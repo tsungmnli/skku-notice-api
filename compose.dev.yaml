@@ -1,0 +1,24 @@
+# DEVELOPMENT ONLY — a throwaway Postgres for local work and tests.
+# The production database lives on the home server; see docs/database.md.
+#
+#   docker compose -f compose.dev.yaml up -d
+#   DATABASE_URL=postgresql://skku:dev@localhost:5432/skku
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: skku
+      POSTGRES_PASSWORD: dev
+      POSTGRES_DB: skku
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - skku-dev-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U skku -d skku"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  skku-dev-db:
