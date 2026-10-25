@@ -5,10 +5,10 @@ DB 서버 자체(Postgres 설치, 볼륨, 백업, 방화벽)는 이 repo가 아�
 
 ## 소유권
 
-| 무엇 | 어디서 |
-| --- | --- |
-| 스키마(테이블, 인덱스) | **이 repo** — `app/models.py`, `migrations/` |
-| DB 서버, 데이터베이스/역할 생성, 백업, 방화벽 | `skku-notice-infra` repo |
+| 무엇                                          | 어디서                                       |
+| --------------------------------------------- | -------------------------------------------- |
+| 스키마(테이블, 인덱스)                        | **이 repo** — `app/models.py`, `migrations/` |
+| DB 서버, 데이터베이스/역할 생성, 백업, 방화벽 | `skku-notice-infra` repo                     |
 
 스키마는 코드 버전과 함께 움직이므로 마이그레이션은 이 repo에 둡니다. DB 쪽에서는 "앱 역할이 데이터베이스를 소유한다"만 보장하면 됩니다.
 
@@ -21,7 +21,7 @@ DB 서버 자체(Postgres 설치, 볼륨, 백업, 방화벽)는 이 repo가 아�
 `DATABASE_URL` 형식 (Vault `kv/skku-notice`에 저장):
 
 ```
-postgresql://skku_app:<비밀번호>@<홈서버IP>:5432/skku
+postgresql://skku_app:<비밀번호>@<홈서버IP>:5432/skkunoti
 ```
 
 `postgres://` 로 시작해도 앱이 `postgresql+psycopg://` 로 변환합니다.
