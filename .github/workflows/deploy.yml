@@ -14,7 +14,7 @@ concurrency:
 
 env:
   IMAGE: tsungmn/skku-notice-api
-  CONFIG_REPO: tsungmn/skku-notice-infra
+  CONFIG_REPO: tsungmnli/skku-notice-infra
   CONFIG_DIR: config/overlays/api
 
 jobs:
