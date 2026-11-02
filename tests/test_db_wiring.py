@@ -43,10 +43,10 @@ def test_no_database_url_means_no_engine_and_a_clear_503():
     ],
 )
 def test_sqlalchemy_url_uses_the_psycopg_driver(given):
-    s = Settings(_env_file=None, database_url=given) # type: ignore
+    s = Settings(_env_file=None, database_url=given)  # type: ignore
     assert s.sqlalchemy_url == "postgresql+psycopg://u:p@h:5432/d"
 
 
 def test_sqlalchemy_url_requires_database_url():
     with pytest.raises(RuntimeError, match="DATABASE_URL"):
-        Settings(_env_file=None).sqlalchemy_url  # type: ignore
+        Settings(_env_file=None).sqlalchemy_url  # type: ignore  # noqa: B018

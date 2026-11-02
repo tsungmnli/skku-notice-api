@@ -12,7 +12,7 @@ PROD = {
 
 
 def settings(**kw) -> Settings:
-    return Settings(_env_file=None, **kw) # type: ignore
+    return Settings(_env_file=None, **kw)  # type: ignore
 
 
 def test_dev_needs_nothing():

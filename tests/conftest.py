@@ -1,10 +1,10 @@
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
-from pathlib import Path
 
 from app.config import Settings
 from app.main import create_app
-
 
 _FIXTURES = Path(__file__).parent / "crawler" / "fixtures"
 
@@ -25,7 +25,7 @@ collect_ignore = (
 def make_settings(**overrides) -> Settings:
     # _env_file=None keeps a developer's local .env out of the tests.
     values = {"app_env": "test", "cors_origins": ["http://localhost:3000"], **overrides}
-    return Settings(_env_file=None, **values) # type: ignore
+    return Settings(_env_file=None, **values)  # type: ignore
 
 
 @pytest.fixture

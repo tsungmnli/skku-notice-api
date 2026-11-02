@@ -20,7 +20,7 @@ from app.timeutil import KST, get_now
 from scripts import seed_dev
 from tests.conftest import make_settings
 
-ADMIN_URL = os.environ.get("TEST_DATABASE_URL", "postgresql://skku:dev@localhost:5432/postgres")
+ADMIN_URL = os.environ.get("TEST_DATABASE_URL", "postgresql://skku:dev@127.0.0.1:5432/postgres")
 
 
 @pytest.fixture(scope="session")
