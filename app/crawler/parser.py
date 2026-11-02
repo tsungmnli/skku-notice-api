@@ -97,3 +97,32 @@ def parse_list(html: str) -> list[ListedArticle]:
     if wrap is None:
         raise ParseError("ul.board-list-wrap not found")
     return [_parse_row(li) for li in wrap.find_all("li", recursive=False) if li.select_one("dl")]
+
+
+_BLOCK_TAGS = ("p", "div", "li", "tr", "h1", "h2", "h3", "h4", "h5", "h6")
+
+
+def _body_text(text: str) -> str:
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = text.replace("\ufeff", "").replace("\u200b", "").replace("\xa0", " ")
+    return "\n".join(line.rstrip() for line in text.split("\n")).strip()
+
+
+def parse_detail(html: str) -> str:
+    """The body text of a notice's view page, line breaks kept; "" when the post has no text.
+
+    The body is a `<pre>` in `dl.board-write-box`. A rich-text post (no `<pre>`) is flattened
+    block by block. A page without that box (error page, deleted post, changed layout) raises
+    ParseError so it is never mistaken for an empty notice.
+    """
+    box = BeautifulSoup(html, "html.parser").select_one("dl.board-write-box dd")
+    if box is None:
+        raise ParseError("dl.board-write-box dd not found")
+    pre = box.select_one("pre")
+    if pre is not None:
+        return _body_text(pre.get_text())
+    for br in box.find_all("br"):
+        br.replace_with("\n")
+    for block in box.find_all(_BLOCK_TAGS):
+        block.append("\n")
+    return _body_text(box.get_text())

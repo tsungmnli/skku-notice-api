@@ -9,7 +9,7 @@ from functools import lru_cache
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-DEFAULT_USER_AGENT = "skku-notice-crawler/0.1 (personal project; list pages only)"
+DEFAULT_USER_AGENT = "skku-notice-crawler/0.1 (personal project; list and view pages)"
 
 
 class CrawlerSettings(BaseSettings):
@@ -21,6 +21,11 @@ class CrawlerSettings(BaseSettings):
     # Pause between requests to the school's server.
     crawl_delay_seconds: float = Field(default=1.0, ge=0)
     crawl_user_agent: str = DEFAULT_USER_AGENT
+    # Notices whose title has no deadline get their view page read: at most this many per run
+    # (0 = never), newest first, so a backlog is worked off over several runs.
+    crawl_detail_limit: int = Field(default=30, ge=0, le=200)
+    # Only notices posted within this many days are read; an older deadline is long past.
+    crawl_detail_max_age_days: int = Field(default=60, ge=1, le=365)
 
     @property
     def sqlalchemy_url(self) -> str:

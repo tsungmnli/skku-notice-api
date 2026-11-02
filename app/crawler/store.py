@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import delete, func, insert, literal_column, or_, select, update
+from sqlalchemy import case, delete, func, insert, literal_column, null, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -73,14 +73,20 @@ def upsert_articles(
             "article_no": it.article_no,
             **{col: getattr(it, col) for col in _COLUMNS},
             "deadline_at": deadlines.get(it.article_no),
+            "deadline_source": "title" if deadlines.get(it.article_no) else None,
         }
         for it in items
     ]
     stmt = pg_insert(Article).values(rows)
     new_deadline = func.coalesce(stmt.excluded.deadline_at, Article.deadline_at)
+    # A deadline read from the title replaces one read from the body (and its evidence line).
+    from_title = stmt.excluded.deadline_at.is_not(None)
+    new_source = case((from_title, "title"), else_=Article.deadline_source)
+    new_evidence = case((from_title, null()), else_=Article.deadline_evidence)
     changed = or_(
         *(getattr(Article, c).is_distinct_from(getattr(stmt.excluded, c)) for c in _COLUMNS),
         Article.deadline_at.is_distinct_from(new_deadline),
+        Article.deadline_source.is_distinct_from(new_source),
     )
     # `xmax = 0` is how Postgres tells a freshly inserted row from an updated one.
     result = session.execute(
@@ -89,6 +95,8 @@ def upsert_articles(
             set_={
                 **{c: getattr(stmt.excluded, c) for c in _COLUMNS},
                 "deadline_at": new_deadline,
+                "deadline_source": new_source,
+                "deadline_evidence": new_evidence,
                 "updated_at": func.now(),
             },
             # Rows that did not change are skipped entirely (no write, no updated_at bump).

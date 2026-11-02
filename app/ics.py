@@ -63,27 +63,26 @@ def is_date_only(deadline: datetime) -> bool:
     return (local.hour, local.minute) == (23, 59)
 
 
-def event_lines(a: Article) -> list[str]:
-    assert a.deadline_at is not None
-    deadline = a.deadline_at
+def _vevent(a: Article, *, uid: str, start: datetime, label: str) -> list[str]:
+    """One VEVENT for an article: all-day when `start` is date-only, else a short timed block."""
     stamp = _utc(a.updated_at)
     lines = [
         "BEGIN:VEVENT",
-        f"UID:article-{a.id}@skku-notice",
+        f"UID:{uid}",
         f"DTSTAMP:{stamp}",
         f"LAST-MODIFIED:{stamp}",
     ]
-    if is_date_only(deadline):
-        day = deadline.astimezone(KST).date()
+    if is_date_only(start):
+        day = start.astimezone(KST).date()
         lines += [
             f"DTSTART;VALUE=DATE:{day:%Y%m%d}",
             f"DTEND;VALUE=DATE:{day + timedelta(days=1):%Y%m%d}",
         ]
     else:
-        lines += [f"DTSTART:{_utc(deadline)}", f"DTEND:{_utc(deadline + TIMED_EVENT_LENGTH)}"]
+        lines += [f"DTSTART:{_utc(start)}", f"DTEND:{_utc(start + TIMED_EVENT_LENGTH)}"]
     description = "\n".join([f"작성: {a.writer}", a.url])
     lines += [
-        f"SUMMARY:{escape_text(f'[마감] {a.title}')}",
+        f"SUMMARY:{escape_text(f'[{label}] {a.title}')}",
         f"DESCRIPTION:{escape_text(description)}",
         f"URL:{a.url}",
         # A deadline is an obligation, not a block of busy time.
@@ -93,8 +92,23 @@ def event_lines(a: Article) -> list[str]:
     return lines
 
 
+def event_lines(a: Article) -> list[str]:
+    """The deadline event (`[마감]`)."""
+    assert a.deadline_at is not None
+    return _vevent(a, uid=f"article-{a.id}@skku-notice", start=a.deadline_at, label="마감")
+
+
+def happening_lines(a: Article) -> list[str]:
+    """The event the notice is about (`[행사]`), with its own UID next to the deadline's."""
+    assert a.event_at is not None
+    return _vevent(a, uid=f"article-{a.id}-event@skku-notice", start=a.event_at, label="행사")
+
+
 def build_calendar(articles: Iterable[Article]) -> str:
-    """The full VCALENDAR text. Articles without a deadline are skipped."""
+    """The full VCALENDAR text: per article a deadline event and/or an event-day event.
+
+    Articles with neither date are skipped.
+    """
     lines = [
         "BEGIN:VCALENDAR",
         "VERSION:2.0",
@@ -109,5 +123,7 @@ def build_calendar(articles: Iterable[Article]) -> str:
     for a in articles:
         if a.deadline_at is not None:
             lines += event_lines(a)
+        if a.event_at is not None:
+            lines += happening_lines(a)
     lines.append("END:VCALENDAR")
     return CRLF.join(fold(line) for line in lines) + CRLF

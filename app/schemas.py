@@ -10,6 +10,7 @@ from app.timeutil import KST
 
 SortKey = Literal["posted_desc", "posted_asc", "views_desc", "deadline_asc"]
 PinnedFilter = Literal["include", "exclude", "only"]
+DeadlineSource = Literal["title", "body"]
 
 
 class ArticleOut(BaseModel):
@@ -24,8 +25,12 @@ class ArticleOut(BaseModel):
     url: str
     categories: list[str]
     deadline_at: datetime | None
+    # When the event itself happens (seminar, shift). Not a deadline: never sorted or filtered on.
+    event_at: datetime | None
+    # Where `deadline_at` was read from. The stored evidence line is for debugging, not served.
+    deadline_source: DeadlineSource | None
 
-    @field_serializer("deadline_at")
+    @field_serializer("deadline_at", "event_at")
     def _as_seoul_iso(self, value: datetime | None) -> str | None:
         # The DB hands back timestamptz in the session zone (UTC); the contract is `+09:00`.
         return value.astimezone(KST).isoformat(timespec="seconds") if value else None
@@ -44,6 +49,8 @@ class ArticleOut(BaseModel):
             url=a.url,
             categories=[c.code for c in a.categories],
             deadline_at=a.deadline_at,
+            event_at=a.event_at,
+            deadline_source=a.deadline_source,
         )
 
 

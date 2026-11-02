@@ -43,13 +43,18 @@ uv run alembic downgrade -1
 ```
 categories(code PK, name, sort_order)
 articles(id PK, article_no UNIQUE, title, writer, posted_on, display_no, is_pinned,
-         view_count, url, deadline_at timestamptz, created_at, updated_at)
+         view_count, url, deadline_at timestamptz, event_at timestamptz,
+         deadline_source, deadline_evidence, detail_checked_at timestamptz,
+         created_at, updated_at)
 article_categories(article_id → articles ON DELETE CASCADE,
                    category_code → categories ON DELETE RESTRICT)   -- PK(article_id, category_code)
 ```
 
 - `writer` 는 별도 테이블 없이 문자열 컬럼입니다. `/writers` 는 `GROUP BY writer` 로 계산합니다.
-- `deadline_at` 이 23:59(KST)면 "시간 없는 날짜 마감"입니다.
+- `deadline_at` 이 23:59(KST)면 "시간 없는 날짜 마감"입니다. `event_at`(행사·근무일)도 같은 규칙입니다.
+- `deadline_source` 는 마감을 어디서 읽었는지(`title` / `body`)이고, `deadline_evidence` 는 본문에서 읽은
+  경우 그 줄(100자 이내)입니다. 본문 전체는 저장하지 않습니다.
+- `detail_checked_at` 이 채워진 글은 상세 페이지를 이미 읽은 것이라 다시 요청하지 않습니다.
 - 제목 검색용 `pg_trgm` 인덱스는 아직 없습니다. 글이 수만 건이어도 순차 스캔으로 충분하며, 느려지면 3단계 이후에 추가합니다.
 
 ## 로컬 개발

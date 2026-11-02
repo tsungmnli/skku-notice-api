@@ -37,12 +37,20 @@ Article = {
   url: string
   categories: string[]  // 카테고리 code 목록
   deadline_at: string | null
+  event_at: string | null           // 행사/근무일 (마감 아님). 정렬·필터에 쓰이지 않음
+  deadline_source: "title" | "body" | null  // deadline_at을 읽은 곳. 마감이 없으면 null
 }
 ArticleListResponse = { items: Article[]; total: number; page: number; size: number; has_next: boolean }
 Category = { code: string; name: string; count: number }
 Writer = { writer: string; count: number }
 LookupResponse = { items: Article[]; missing_ids: number[] }
 ```
+
+### 본문에서 읽은 날짜
+
+- `deadline_at`은 제목에서 먼저 읽고, 제목에 없으면 크롤러가 상세 페이지 본문에서 읽습니다. 어디서 읽었는지가 `deadline_source`이며, `"body"`는 정규식이 본문의 단서어(모집기간, 접수기간 …) 뒤 날짜를 읽은 값이라 제목 기준보다 틀릴 가능성이 높습니다. 프론트는 "본문 기준"으로 표시합니다.
+- `event_at`은 "일시/일정/행사일"처럼 **행사 자체**가 열리는 시각입니다. 마감이 아니므로 `has_deadline`, `deadline_from/to`, `deadline_asc`는 `event_at`을 보지 않습니다. 시각을 모르면 `deadline_at`과 같은 규칙으로 23:59.
+- 본문 값을 읽은 **근거 줄**(`deadline_evidence`)은 디버깅용이라 DB에만 있고 응답에는 나가지 않습니다.
 
 ## `GET /api/v1/articles`
 
@@ -103,14 +111,15 @@ LookupResponse = { items: Article[]; missing_ids: number[] }
 
 ## `GET /api/v1/calendar`
 
-`id` 반복 쿼리 (1~100개). 마감이 있는 글을 `text/calendar` (ICS)로 내보냅니다. 프론트가 구독 URL로 쓰며
+`id` 반복 쿼리 (1~100개). 마감 또는 행사일이 있는 글을 `text/calendar` (ICS)로 내보냅니다. 프론트가 구독 URL로 쓰며
 구글 캘린더 서버가 직접 가져가므로 **인터넷에서 접근 가능한 HTTPS**여야 합니다. `HEAD`도 지원합니다.
 
 - `id`가 0개이거나 100개를 넘으면 422 `"조회할 ID는 1~100개까지 가능합니다."`
-- 마감이 없는 글, 없는 id, 범위를 벗어난 id, 중복 id는 오류 없이 건너뜁니다. 내보낼 글이 하나도 없어도 빈 (유효한) 캘린더를 200으로 돌려줍니다.
-- 이벤트는 마감 시각 오름차순(같으면 `id`). **지난 마감도 포함**합니다 (즐겨찾기를 그대로 반영, 지난 일정을 숨기는 것은 캘린더 앱의 몫).
+- 마감도 행사일도 없는 글, 없는 id, 범위를 벗어난 id, 중복 id는 오류 없이 건너뜁니다. 내보낼 글이 하나도 없어도 빈 (유효한) 캘린더를 200으로 돌려줍니다.
+- 글 하나에 이벤트가 최대 둘: 마감(`[마감] <제목>`)과 행사일(`[행사] <제목>`, `event_at`이 있을 때). 글은 **가장 이른 날짜** 오름차순(같으면 `id`)이고, 한 글 안에서는 마감, 행사 순입니다. 행사일의 종일/시간 일정 규칙은 마감과 같습니다.
+- **지난 일정도 포함**합니다 (즐겨찾기를 그대로 반영, 지난 일정을 숨기는 것은 캘린더 앱의 몫).
 - 마감 시각이 23:59(서울)면 **종일 일정** (`DTSTART;VALUE=DATE`, `DTEND`는 다음 날 — 종료일은 배타적), 아니면 **시간 일정**: 마감 시각에 시작해 30분 길이, UTC(`Z`)로 표기.
 - 제목은 `[마감] <글 제목>`, 설명은 `작성: <작성자>` + 게시글 URL. 일정은 "바쁨"으로 표시되지 않습니다(`TRANSP:TRANSPARENT`).
-- `UID`는 `article-<id>@skku-notice`로 고정. 마감이 바뀌어도 UID가 같아서 구독자 캘린더에서 이벤트가 갱신됩니다 (중복 생성 안 됨). 글이 사라지거나 마감이 없어지면 피드에서 빠지고 캘린더 앱이 삭제합니다.
+- `UID`는 마감이 `article-<id>@skku-notice`, 행사일이 `article-<id>-event@skku-notice`로 고정. 마감이 바뀌어도 UID가 같아서 구독자 캘린더에서 이벤트가 갱신됩니다 (중복 생성 안 됨). 글이 사라지거나 마감이 없어지면 피드에서 빠지고 캘린더 앱이 삭제합니다.
 - `DTSTAMP`/`LAST-MODIFIED`는 글 행의 `updated_at`. 같은 데이터면 응답이 항상 같은 바이트입니다.
 - `Cache-Control: public, max-age=300`. 구글 캘린더의 실제 갱신 주기는 구글이 정하며(대체로 하루 단위), 피드의 `REFRESH-INTERVAL`은 힌트일 뿐입니다.

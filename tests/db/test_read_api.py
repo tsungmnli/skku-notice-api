@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.models import Article, Category
+from app.timeutil import KST
 from tests.db import reference
 from tests.db.conftest import NOW
 
@@ -50,7 +51,25 @@ def test_article_json_matches_types_ts(api):
         # Category codes, in the display order of the filter UI.
         "categories": ["admission", "scholarship"],
         "deadline_at": "2026-10-06T17:00:00+09:00",
+        "event_at": None,
+        "deadline_source": None,
     }
+
+
+def test_event_dates_and_deadline_source_are_served_but_the_evidence_line_is_not(empty_api, engine):
+    add_articles(
+        engine,
+        {
+            "deadline_at": datetime(2026, 11, 10, 23, 59, tzinfo=KST),
+            "deadline_source": "body",
+            "deadline_evidence": "가. 모집기간 : 2026.10.30(금)~2026.11.10(화)까지",
+            "event_at": datetime(2026, 11, 6, 9, 30, tzinfo=KST),
+        },
+    )
+    body = empty_api.get(f"{URL}/articles/1").json()
+    assert body["event_at"] == "2026-11-06T09:30:00+09:00"
+    assert body["deadline_source"] == "body"
+    assert "deadline_evidence" not in body
 
 
 def test_list_envelope_and_item_keys(api):
@@ -58,7 +77,8 @@ def test_list_envelope_and_item_keys(api):
     assert list(body) == ["items", "total", "page", "size", "has_next"]
     assert set(body["items"][0]) == {
         "id", "article_no", "title", "writer", "posted_on", "display_no",
-        "is_pinned", "view_count", "url", "categories", "deadline_at",
+        "is_pinned", "view_count", "url", "categories", "deadline_at", "event_at",
+        "deadline_source",
     }  # fmt: skip
     assert (body["total"], body["page"], body["size"], body["has_next"]) == (36, 1, 3, True)
 

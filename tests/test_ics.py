@@ -90,6 +90,27 @@ def test_a_deadline_with_a_time_is_a_timed_event_in_utc():
     assert "DTSTART;VALUE=DATE" not in e
 
 
+def test_an_event_day_is_its_own_event_with_its_own_uid():
+    a = article(
+        deadline=datetime(2026, 11, 3, 23, 59, tzinfo=KST),
+        event_at=datetime(2026, 11, 6, 9, 30, tzinfo=KST),
+    )
+    deadline, happening = parse_events(ics.build_calendar([a]))
+    assert deadline["UID"] == "article-7@skku-notice"
+    assert deadline["SUMMARY"].startswith("[마감] ")
+    assert happening["UID"] == "article-7-event@skku-notice"
+    assert happening["SUMMARY"] == "[행사] 장학금 신청 안내"
+    assert happening["DTSTART"] == "20261106T003000Z"  # 09:30 KST
+    assert happening["TRANSP"] == "TRANSPARENT"
+
+
+def test_an_article_with_only_an_event_day_is_exported_and_date_only_is_all_day():
+    a = article(event_at=datetime(2026, 11, 6, 23, 59, tzinfo=KST))
+    (e,) = parse_events(ics.build_calendar([a]))
+    assert e["UID"] == "article-7-event@skku-notice"
+    assert (e["DTSTART;VALUE=DATE"], e["DTEND;VALUE=DATE"]) == ("20261106", "20261107")
+
+
 @pytest.mark.parametrize(
     ("deadline", "all_day"),
     [

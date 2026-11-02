@@ -6,10 +6,10 @@ from collections.abc import Callable
 from types import TracebackType
 from typing import Protocol
 
-import httpx
+import httpx2
 
 from app.crawler.config import DEFAULT_USER_AGENT
-from app.crawler.parser import list_page_url
+from app.crawler.parser import article_url, list_page_url
 
 logger = logging.getLogger(__name__)
 
@@ -26,20 +26,26 @@ class ListSource(Protocol):
     def list_page(self, offset: int) -> str: ...
 
 
+class DetailSource(Protocol):
+    """Fetches one notice's view page; tests substitute a fake."""
+
+    def detail_page(self, article_no: int) -> str: ...
+
+
 class Fetcher:
     def __init__(
         self,
         *,
-        client: httpx.Client | None = None,
+        client: httpx2.Client | None = None,
         user_agent: str = DEFAULT_USER_AGENT,
         delay: float = 1.0,
         attempts: int = 3,
         backoff: float = 2.0,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
-        self._client = client or httpx.Client(
+        self._client = client or httpx2.Client(
             headers={"User-Agent": user_agent, "Accept-Language": "ko"},
-            timeout=httpx.Timeout(15.0, connect=5.0),
+            timeout=httpx2.Timeout(15.0, connect=5.0),
             follow_redirects=True,
         )
         self._delay = delay
@@ -71,7 +77,7 @@ class Fetcher:
         for attempt in range(1, self._attempts + 1):
             try:
                 resp = self._client.get(url)
-            except httpx.TransportError as exc:  # timeouts, resets, DNS, ...
+            except httpx2.TransportError as exc:  # timeouts, resets, DNS, ...
                 last = exc
             else:
                 if resp.status_code == 200:
@@ -88,3 +94,6 @@ class Fetcher:
 
     def list_page(self, offset: int) -> str:
         return self.get(list_page_url(offset))
+
+    def detail_page(self, article_no: int) -> str:
+        return self.get(article_url(article_no))

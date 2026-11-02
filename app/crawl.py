@@ -1,7 +1,8 @@
 """Crawl the school board: `python -m app.crawl [--pages N] [--dry-run]`.
 
 This is the CronJob command. Exit code 0 = stored, 1 = failed (the Job's retry policy applies).
-`--dry-run` fetches and parses but never touches the database, so it needs no DATABASE_URL.
+`--dry-run` fetches and parses but never touches the database, so it needs no DATABASE_URL
+(view pages are read only in a real run: which notices need one is known from the database).
 """
 
 import argparse
@@ -9,6 +10,7 @@ import logging
 import sys
 
 from app.crawler.config import get_crawler_settings
+from app.crawler.details import read_details
 from app.crawler.fetch import Fetcher, FetchError
 from app.crawler.parser import ParseError
 from app.crawler.run import CrawlError, crawl, fetch_articles, with_deadlines
@@ -50,7 +52,14 @@ def main(argv: list[str] | None = None) -> int:
 
             engine = make_engine(settings.sqlalchemy_url)
             try:
-                result, seen = crawl(make_sessionmaker(engine), fetcher, max_pages=pages)
+                factory = make_sessionmaker(engine)
+                result, seen = crawl(factory, fetcher, max_pages=pages)
+                details = read_details(
+                    factory,
+                    fetcher,
+                    limit=settings.crawl_detail_limit,
+                    max_age_days=settings.crawl_detail_max_age_days,
+                )
             finally:
                 engine.dispose()
     except (FetchError, ParseError, CrawlError) as exc:
@@ -64,6 +73,14 @@ def main(argv: list[str] | None = None) -> int:
         result.updated,
         result.unchanged,
         result.unpinned,
+    )
+    logger.info(
+        "details: checked=%d deadlines=%d events=%d failed=%d%s",
+        details.checked,
+        details.deadlines,
+        details.events,
+        details.failed,
+        " (gave up: the school's server keeps failing)" if details.gave_up else "",
     )
     return 0
 

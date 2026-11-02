@@ -24,7 +24,7 @@ def calendar_feed(
     session: Annotated[Session, Depends(get_session)],
     ids: Annotated[list[int] | None, Query(alias="id")] = None,
 ) -> Response:
-    """ICS feed with one event per requested article that has a deadline.
+    """ICS feed: per requested article a `[마감]` event (deadline) and a `[행사]` event (event day).
 
     Subscribed to by Google Calendar & co., which fetch the URL themselves.
     """
@@ -32,11 +32,12 @@ def calendar_feed(
         raise HTTPException(422, f"조회할 ID는 1~{MAX_IDS}개까지 가능합니다.")
 
     found = queries.get_articles_by_id(session, ids).values()
-    with_deadline = sorted(
-        (a for a in found if a.deadline_at is not None), key=lambda a: (a.deadline_at, a.id)
+    dated = sorted(
+        (a for a in found if a.deadline_at is not None or a.event_at is not None),
+        key=lambda a: (min(d for d in (a.deadline_at, a.event_at) if d is not None), a.id),
     )
     return Response(
-        build_calendar(with_deadline),
+        build_calendar(dated),
         media_type="text/calendar",
         headers={
             # Short, so a new deadline shows up soon, but enough to absorb a client's retries.

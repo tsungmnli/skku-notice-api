@@ -46,6 +46,27 @@ def test_events_are_ordered_by_deadline_not_by_id_or_request_order(api):
     assert uids == [f"article-{i}@skku-notice" for i in (1, 6, 2, 3)]
 
 
+def test_an_event_day_is_exported_next_to_the_deadline_and_orders_by_the_earliest_date(
+    empty_api, engine
+):
+    add_articles(
+        engine,
+        {  # id 1: deadline Nov 10, event Nov 12
+            "deadline_at": datetime(2026, 11, 10, 23, 59, tzinfo=KST),
+            "event_at": datetime(2026, 11, 12, 13, 30, tzinfo=KST),
+        },
+        {"event_at": datetime(2026, 11, 6, 9, 30, tzinfo=KST)},  # id 2: event only, earlier
+        {"deadline_at": datetime(2026, 11, 8, 23, 59, tzinfo=KST)},  # id 3
+    )
+    uids = [e["UID"] for e in parse_events(empty_api.get(f"{URL}?id=1&id=2&id=3").text)]
+    assert uids == [
+        "article-2-event@skku-notice",
+        "article-3@skku-notice",
+        "article-1@skku-notice",
+        "article-1-event@skku-notice",
+    ]
+
+
 def test_passed_deadlines_are_still_exported(api):
     # The feed mirrors the user's favorites; hiding past events is the calendar app's job.
     assert [e["UID"] for e in parse_events(feed(api, 1).text)] == ["article-1@skku-notice"]

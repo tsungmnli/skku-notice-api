@@ -66,6 +66,14 @@ class Article(Base):
     url: Mapped[str] = mapped_column(Text)
     # Stored as timestamptz; 23:59 KST means "date only" (see docs/api-contract.md).
     deadline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # When the event itself takes place (a talk, a work day); never a deadline. Same 23:59 rule.
+    event_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Where `deadline_at` came from: 'title' or 'body'. NULL while there is no deadline.
+    deadline_source: Mapped[str | None] = mapped_column(String(8))
+    # The body line a 'body' deadline was read from (max 100 chars); the body itself is not stored.
+    deadline_evidence: Mapped[str | None] = mapped_column(String(100))
+    # Set once the detail page has been fetched and read, so it is not requested again.
+    detail_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
