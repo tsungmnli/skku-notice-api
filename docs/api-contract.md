@@ -37,7 +37,7 @@ Article = {
   url: string
   categories: string[]  // 카테고리 code 목록
   deadline_at: string | null
-  event_at: string | null           // 행사/근무일 (마감 아님). 정렬·필터에 쓰이지 않음
+  event_at: string | null           // 행사/근무일 (마감 아님). 시각을 알면 ISO 8601, 모르면 날짜만("2026-11-20"). 정렬·필터에 쓰이지 않음
   deadline_source: "title" | "body" | null  // deadline_at을 읽은 곳. 마감이 없으면 null
 }
 ArticleListResponse = { items: Article[]; total: number; page: number; size: number; has_next: boolean }
@@ -49,7 +49,7 @@ LookupResponse = { items: Article[]; missing_ids: number[] }
 ### 본문에서 읽은 날짜
 
 - `deadline_at`은 제목에서 먼저 읽고, 제목에 없으면 크롤러가 상세 페이지 본문에서 읽습니다. 어디서 읽었는지가 `deadline_source`이며, `"body"`는 정규식이 본문의 단서어(모집기간, 접수기간 …) 뒤 날짜를 읽은 값이라 제목 기준보다 틀릴 가능성이 높습니다. 프론트는 "본문 기준"으로 표시합니다.
-- `event_at`은 "일시/일정/행사일"처럼 **행사 자체**가 열리는 시각입니다. 마감이 아니므로 `has_deadline`, `deadline_from/to`, `deadline_asc`는 `event_at`을 보지 않습니다. 시각을 모르면 `deadline_at`과 같은 규칙으로 23:59.
+- `event_at`은 "일시/일정/행사일"처럼 **행사 자체**가 열리는 시각입니다. 마감이 아니므로 `has_deadline`, `deadline_from/to`, `deadline_asc`는 `event_at`을 보지 않습니다. 시각을 모르면 `"2026-11-20"`처럼 **날짜만** 내려갑니다(23:59를 붙이지 않음). 반대로 `deadline_at`은 시각을 몰라도 항상 `...T23:59:00+09:00`입니다(그날 끝까지가 마감이라는 뜻). 캘린더 피드는 둘 다 종일 일정으로 만듭니다.
 - 본문 값을 읽은 **근거 줄**(`deadline_evidence`)은 디버깅용이라 DB에만 있고 응답에는 나가지 않습니다.
 
 ## `GET /api/v1/articles`

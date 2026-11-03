@@ -492,3 +492,21 @@ def test_a_start_date_with_no_end_is_no_deadline(line):
 def test_a_range_with_an_end_date_still_gives_the_end():
     body = "접수기간 : 11/3 ~ 11/10까지"
     assert extract_from_body(body, date(2026, 10, 22)).deadline_at == kst(2026, 11, 10, 23, 59)
+
+
+@pytest.mark.parametrize(
+    "line, event",
+    [
+        # Real notice 141534: a comma between the weekday and the time used to drop the time.
+        (
+            "4. 일시 및 장소: 2026년 11월 20일(금), 오전 10시30분 ~ 11시45분, 경제관 2층",
+            kst(2026, 11, 20, 10, 30),
+        ),
+        ("일시 : 11/20(금), 14:00~16:00", kst(2026, 11, 20, 14, 0)),
+        ("일시 : 11월 20일 (금), 오후 2시", kst(2026, 11, 20, 14, 0)),
+        # A comma that only separates two items is still no time.
+        ("일시 : 11/20(금), 경제관 2층", kst(2026, 11, 20, 23, 59)),
+    ],
+)
+def test_a_comma_between_the_weekday_and_the_time(line, event):
+    assert extract_from_body(line, POSTED).event_at == event

@@ -29,7 +29,8 @@ _DATE = (
 _DATE_RE = re.compile(_DATE)
 _TILDE = "~∼～"
 _TIME_RE = re.compile(
-    r"^(?:\s*\([월화수목금토일]\)|\s*[월화수목금토일](?:요일)?)?\s*"
+    # `11/20(금), 오전 10시30분`: a comma may sit between the weekday and the time.
+    r"^(?:\s*\([월화수목금토일]\)|\s*[월화수목금토일](?:요일)?)?[\s,，]*"
     r"(?:(?P<ampm>오전|오후)\s*(?P<h1>\d{1,2})\s*시(?:\s*(?P<min1>\d{1,2})\s*분)?"
     r"|(?P<h2>\d{1,2})\s*:\s*(?P<min2>\d{2})"
     r"|(?P<h3>\d{1,2})\s*시(?!간)(?:\s*(?P<min3>\d{1,2})\s*분)?"

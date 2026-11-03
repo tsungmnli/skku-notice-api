@@ -94,7 +94,7 @@ jobs:
             echo "tag already up to date"
             exit 0
           fi
-          git commit -m "skku-notice-api: ${GITHUB_SHA::7}"
+          git commit -m "api: ${GITHUB_SHA::7}"
           for attempt in 1 2 3; do
             git push && exit 0
             git pull --rebase

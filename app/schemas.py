@@ -30,10 +30,22 @@ class ArticleOut(BaseModel):
     # Where `deadline_at` was read from. The stored evidence line is for debugging, not served.
     deadline_source: DeadlineSource | None
 
-    @field_serializer("deadline_at", "event_at")
-    def _as_seoul_iso(self, value: datetime | None) -> str | None:
+    @field_serializer("deadline_at")
+    def _deadline_as_seoul_iso(self, value: datetime | None) -> str | None:
         # The DB hands back timestamptz in the session zone (UTC); the contract is `+09:00`.
+        # A deadline without a time of day keeps its implicit 23:59 (due at the end of that day).
         return value.astimezone(KST).isoformat(timespec="seconds") if value else None
+
+    @field_serializer("event_at")
+    def _event_as_seoul_iso(self, value: datetime | None) -> str | None:
+        if value is None:
+            return None
+        local = value.astimezone(KST)
+        # 23:59 is how the data marks "no time of day". An event has no end-of-day moment, so it
+        # goes out as a bare date (`2026-11-20`) instead of a made-up 23:59.
+        if (local.hour, local.minute) == (23, 59):
+            return local.date().isoformat()
+        return local.isoformat(timespec="seconds")
 
     @classmethod
     def from_model(cls, a: Article) -> "ArticleOut":
