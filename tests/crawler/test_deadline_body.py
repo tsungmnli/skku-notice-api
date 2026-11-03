@@ -474,3 +474,21 @@ def test_title_stands_in_only_when_the_body_has_no_event_clue():
     # The body's date, with its time, beats the title's.
     got = extract_from_body("일시 : 11/2 15:00", POSTED)
     assert event_for(got, title, POSTED) == kst(2026, 11, 2, 15, 0)
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "2. 잔여 APC 추가 지원 기간 및 활용 방법: 2026. 11. 3.(화) ~ 소진 시까지",
+        "지원 기간 : 2026. 11. 3.(화) ~ 예산 소진 시까지",
+        "접수기간 : 11/3 ~ 별도 공지 시까지",
+    ],
+)
+def test_a_start_date_with_no_end_is_no_deadline(line):
+    # `11/3 ~ 소진 시까지` opens a period; the date is its start, not a deadline.
+    assert extract_from_body(line, date(2026, 10, 22)).deadline_at is None
+
+
+def test_a_range_with_an_end_date_still_gives_the_end():
+    body = "접수기간 : 11/3 ~ 11/10까지"
+    assert extract_from_body(body, date(2026, 10, 22)).deadline_at == kst(2026, 11, 10, 23, 59)

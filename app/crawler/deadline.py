@@ -238,6 +238,12 @@ _RANGE_GAP_RE = re.compile(
 )
 _UNTIL_RE = re.compile(rf"^{_WEEKDAY}(?:\s*(?:오전|오후)?\s*[\d:시분\s]*|\s*(?:정오|자정))?\s*까지")
 _UNTIL_SPAN = timedelta(days=366)
+# `2026. 11. 3.(화) ~ 소진 시까지`: the date opens a period that has no end date. It is the start,
+# not a deadline, so it is no candidate.
+_OPEN_END_RE = re.compile(
+    rf"^{_WEEKDAY}(?:\s*(?:오전|오후)?\s*[\d:시분\s]*|\s*(?:정오|자정))?\s*[{_TILDE}]\s*"
+    r"(?:예산\s*)?(?:소진|별도|추후|상시|선착순|공지|충원)"
+)
 
 
 def _deadline_candidates(line: str, start: int, end: int, posted_on: date) -> list[datetime]:
@@ -254,6 +260,8 @@ def _deadline_candidates(line: str, start: int, end: int, posted_on: date) -> li
         d = _build_date(m, posted_on, prev if chained else None)
         prev_end = m.end()
         if d is None:
+            continue
+        if _OPEN_END_RE.match(line[_skip_dot(line, m.end()) :][:40]):
             continue
         at = (
             datetime.combine(d, _time_after(line, m.end()), KST)

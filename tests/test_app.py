@@ -27,8 +27,8 @@ def test_unknown_route_is_json_detail(client):
 
 
 def test_cors_allows_configured_origin_only(client):
-    ok = client.get("/api/healthz", headers={"Origin": "http://localhost:3000"})
-    assert ok.headers["access-control-allow-origin"] == "http://localhost:3000"
+    ok = client.get("/api/healthz", headers={"Origin": "http://127.0.0.1:3000"})
+    assert ok.headers["access-control-allow-origin"] == "http://127.0.0.1:3000"
 
     other = client.get("/api/healthz", headers={"Origin": "https://evil.example"})
     assert "access-control-allow-origin" not in other.headers

@@ -2,7 +2,7 @@
 # The production database lives on the home server; see docs/database.md.
 #
 #   docker compose -f compose.dev.yaml up -d
-#   DATABASE_URL=postgresql://skku:dev@localhost:5432/skku
+#   DATABASE_URL=postgresql://skku:dev@127.0.0.1:5432/skku
 services:
   db:
     image: postgres:17

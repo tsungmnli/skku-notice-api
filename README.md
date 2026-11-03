@@ -13,10 +13,10 @@ docker compose -f compose.dev.yaml up -d      # 개발용 Postgres
 cp .env.example .env
 uv run python -m app.migrate                  # 테이블 생성
 uv run python -m scripts.seed_dev             # 프론트 mock과 같은 36건 (여러 번 실행해도 안전)
-uv run uvicorn app.main:create_app --factory --reload   # http://localhost:8000/api/docs
+uv run uvicorn app.main:create_app --factory --reload   # http://127.0.0.1:8000/api/docs
 ```
 
-프론트는 `NEXT_PUBLIC_API_BASE=http://localhost:8000/api/v1` 로 연결합니다.
+프론트는 `NEXT_PUBLIC_API_BASE=http://127.0.0.1:8000/api/v1` 로 연결합니다.
 DB 구성, 마이그레이션 규칙, 홈서버 DB와의 약속은 [docs/database.md](docs/database.md).
 
 ## 검증

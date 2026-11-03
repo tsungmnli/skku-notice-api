@@ -24,7 +24,7 @@ collect_ignore = (
 
 def make_settings(**overrides) -> Settings:
     # _env_file=None keeps a developer's local .env out of the tests.
-    values = {"app_env": "test", "cors_origins": ["http://localhost:3000"], **overrides}
+    values = {"app_env": "test", "cors_origins": ["http://127.0.0.1:3000"], **overrides}
     return Settings(_env_file=None, **values)  # type: ignore
 
 

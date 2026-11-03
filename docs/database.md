@@ -71,5 +71,5 @@ uv run python -m scripts.seed_dev      # 프론트 mock과 같은 36건
 ## 테스트와 DB
 
 DB가 필요한 테스트는 서버에 임시 데이터베이스(`skku_test_<랜덤>`)를 만들고 끝나면 지웁니다.
-접속 정보는 `TEST_DATABASE_URL` (기본값 `postgresql://skku:dev@localhost:5432/postgres`, `CREATE DATABASE` 권한 필요 — compose.dev.yaml 의 `skku` 역할은 가능).
+접속 정보는 `TEST_DATABASE_URL` (기본값 `postgresql://skku:dev@127.0.0.1:5432/postgres`, `CREATE DATABASE` 권한 필요 — compose.dev.yaml 의 `skku` 역할은 가능).
 DB에 접속할 수 없으면 해당 테스트는 건너뜁니다. CI에서는 `REQUIRE_DB=1` 로 건너뛰는 대신 실패하게 합니다.

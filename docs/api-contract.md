@@ -14,7 +14,7 @@ ingress가 `/api` 접두어를 **떼지 않고** 그대로 넘기므로, 앱이 
 | `/api/v1/...` | 아래 비즈니스 엔드포인트 |
 | `/api/docs`, `/api/openapi.json` | `DOCS_ENABLED=true`일 때만 |
 
-프론트 `NEXT_PUBLIC_API_BASE`는 `https://<host>/api/v1` 입니다 (개발 기본값 `http://localhost:8000/api/v1`).
+프론트 `NEXT_PUBLIC_API_BASE`는 `https://<host>/api/v1` 입니다 (개발 기본값 `http://127.0.0.1:8000/api/v1`).
 
 ## 공통
 
