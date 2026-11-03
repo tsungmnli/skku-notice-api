@@ -67,6 +67,14 @@ def test_seed_refuses_to_run_in_prod(monkeypatch):
         "DATABASE_URL": "postgresql://x:y@127.0.0.1:1/z",
         "PUBLIC_URL": "https://example.com",
         "CORS_ORIGINS": "https://example.com",
+        # The prod guard checks the account settings first; give it a complete environment so
+        # the failure under test is the seed script's own refusal.
+        "SMTP_HOST": "smtp.example.com",
+        "SMTP_USER": "u",
+        "SMTP_PASSWORD": "p",
+        "TURNSTILE_SECRET_KEY": "t",
+        "SESSION_SECRET": "s" * 32,
+        "TRUSTED_PROXY_HOPS": "2",
     }.items():
         monkeypatch.setenv(key, value)
     get_settings.cache_clear()

@@ -9,14 +9,32 @@ import argparse
 import logging
 import sys
 
+from sqlalchemy.exc import SQLAlchemyError
+
+from app.auth.cleanup import purge_expired
 from app.crawler.config import get_crawler_settings
 from app.crawler.details import read_details
 from app.crawler.fetch import Fetcher, FetchError
 from app.crawler.parser import ParseError
 from app.crawler.run import CrawlError, crawl, fetch_articles, with_deadlines
 from app.db import make_engine, make_sessionmaker
+from app.timeutil import now_kst
 
 logger = logging.getLogger("app.crawl")
+
+
+def purge_account_rows(factory) -> None:
+    """Drop expired sessions and spent e-mail tokens. Housekeeping only: if it fails the crawl
+    still counts as done, and the next run tries again."""
+    try:
+        with factory() as session, session.begin():
+            purged = purge_expired(session, now=now_kst())
+    except SQLAlchemyError:
+        logger.warning("account cleanup failed", exc_info=True)
+        return
+    logger.info(
+        "cleanup: sessions=%d email_tokens=%d removed", purged.sessions, purged.email_tokens
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -60,6 +78,7 @@ def main(argv: list[str] | None = None) -> int:
                     limit=settings.crawl_detail_limit,
                     max_age_days=settings.crawl_detail_max_age_days,
                 )
+                purge_account_rows(factory)
             finally:
                 engine.dispose()
     except (FetchError, ParseError, CrawlError) as exc:

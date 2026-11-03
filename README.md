@@ -16,7 +16,7 @@ uv run python -m scripts.seed_dev             # 프론트 mock과 같은 36건 (
 uv run uvicorn app.main:create_app --factory --reload   # http://127.0.0.1:8000/api/docs
 ```
 
-프론트는 `NEXT_PUBLIC_API_BASE=http://127.0.0.1:8000/api/v1` 로 연결합니다.
+프론트는 `NEXT_PUBLIC_API_BASE=http://localhost:8000/api/v1` 로 연결합니다. (`SMTP_HOST` 가 없으면 인증·재설정 메일의 링크가 이 서버 콘솔에 출력됩니다.) 쿠키 때문에 웹과 API는 같은 호스트 이름(`localhost`)으로 열어야 합니다 (`127.0.0.1` 금지).
 DB 구성, 마이그레이션 규칙, 홈서버 DB와의 약속은 [docs/database.md](docs/database.md).
 
 ## 검증
@@ -57,7 +57,9 @@ docker build -t tsungmn/skku-notice-api .
 docker run --rm -p 8000:8000 -e APP_ENV=dev tsungmn/skku-notice-api
 ```
 
-운영 환경(`APP_ENV=prod`)에서는 `DATABASE_URL`, `PUBLIC_URL`, `CORS_ORIGINS`가 없으면 서버가 일부러 뜨지 않습니다.
+운영 환경(`APP_ENV=prod`)에서는 `DATABASE_URL`, `PUBLIC_URL`, `CORS_ORIGINS`, 계정 기능용 값
+(`SESSION_SECRET`, `SMTP_HOST`/`SMTP_USER`/`SMTP_PASSWORD`, `TURNSTILE_SECRET_KEY`, `TRUSTED_PROXY_HOPS`)이
+없으면 서버가 일부러 뜨지 않습니다. 전체 목록은 `.env.example`.
 
 ## 크롤러
 

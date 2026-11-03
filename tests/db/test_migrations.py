@@ -7,7 +7,14 @@ from app.config import Settings
 from app.migrate import alembic_config, run
 from app.models import Base
 
-APP_TABLES = {"articles", "categories", "article_categories"}
+APP_TABLES = {
+    "articles",
+    "categories",
+    "article_categories",
+    "users",
+    "sessions",
+    "email_tokens",
+}
 
 
 def sqlalchemy_url(database_url: str) -> str:

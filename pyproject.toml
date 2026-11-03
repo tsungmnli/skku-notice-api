@@ -12,6 +12,12 @@ dependencies = [
     "alembic>=1.14",
     "httpx2>=2.16.0",
     "beautifulsoup4>=4.12",
+    "argon2-cffi>=23.1",
+    "authlib>=1.3",
+    # Authlib's Starlette client imports `httpx`; the crawler's `httpx2` is a different package.
+    "httpx>=0.27",
+    # Required by Starlette's SessionMiddleware (OAuth state cookie).
+    "itsdangerous>=2.2",
 ]
 
 [dependency-groups]

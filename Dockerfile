@@ -20,6 +20,8 @@ COPY migrations ./migrations
 RUN useradd --system --uid 10001 --no-create-home app
 USER 10001
 EXPOSE 8000
-# The ingress terminates TLS and forwards X-Forwarded-*; trust it (cluster-internal only).
+# The ingress terminates TLS, but uvicorn must not act on X-Forwarded-*: with "*" it would trust
+# a client-supplied address. The app reads X-Forwarded-For itself, counting TRUSTED_PROXY_HOPS
+# proxies from the right (app/auth/clientip.py).
 CMD ["uvicorn", "app.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", \
-     "--proxy-headers", "--forwarded-allow-ips", "*"]
+     "--no-proxy-headers"]

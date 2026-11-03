@@ -48,8 +48,21 @@ articles(id PK, article_no UNIQUE, title, writer, posted_on, display_no, is_pinn
          created_at, updated_at)
 article_categories(article_id → articles ON DELETE CASCADE,
                    category_code → categories ON DELETE RESTRICT)   -- PK(article_id, category_code)
+users(id uuid PK, email UNIQUE, password_hash, google_sub UNIQUE, name,
+      email_verified_at timestamptz, created_at)
+sessions(token_hash PK, user_id → users ON DELETE CASCADE, created_at, expires_at,
+         last_used_at, client, user_agent)
+email_tokens(token_hash PK, user_id → users ON DELETE CASCADE, purpose, created_at,
+             expires_at, used_at)
 ```
 
+- 계정 테이블: `users.email` 은 항상 소문자(CHECK)라서 UNIQUE가 대소문자를 구분하지 않습니다.
+  `password_hash` 가 NULL이면 Google로만 가입한 계정입니다. `email_verified_at` 이 NULL이면 로그인할 수 없습니다.
+- `sessions.token_hash`, `email_tokens.token_hash` 는 무작위 토큰의 SHA-256(hex)만 저장합니다. 토큰 원문은 DB에 없습니다.
+  `sessions.client` 는 `web`/`android`/`ios` 중 하나입니다.
+- `email_tokens` 는 (user, purpose)당 **미사용** 토큰이 하나만 있을 수 있습니다(부분 유니크 인덱스).
+  새 토큰을 발급하기 전에 이전 토큰을 `used_at` 으로 닫아야 합니다.
+- UUID 기본값 `gen_random_uuid()` 는 PostgreSQL 13+ 내장 함수라 확장이 필요 없습니다.
 - `writer` 는 별도 테이블 없이 문자열 컬럼입니다. `/writers` 는 `GROUP BY writer` 로 계산합니다.
 - `deadline_at` 이 23:59(KST)면 "시간 없는 날짜 마감"입니다. `event_at`(행사·근무일)도 같은 규칙입니다.
 - `deadline_source` 는 마감을 어디서 읽었는지(`title` / `body`)이고, `deadline_evidence` 는 본문에서 읽은

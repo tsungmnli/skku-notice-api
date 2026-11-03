@@ -1,7 +1,9 @@
+import uuid
 from datetime import date, datetime
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Column,
     Date,
     DateTime,
@@ -13,6 +15,7 @@ from sqlalchemy import (
     String,
     Table,
     Text,
+    Uuid,
     func,
     text,
 )
@@ -92,4 +95,78 @@ class Article(Base):
             "deadline_at",
             postgresql_where=text("deadline_at IS NOT NULL"),
         ),
+    )
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, primary_key=True, default=uuid.uuid4, server_default=text("gen_random_uuid()")
+    )
+    # Always stored lowercase (see the CHECK below), so UNIQUE is also case-insensitive.
+    email: Mapped[str] = mapped_column(String(320), unique=True)
+    # NULL for accounts that only ever signed in with Google.
+    password_hash: Mapped[str | None] = mapped_column(Text)
+    # Google's stable account id (`sub`); the e-mail address can change, this cannot.
+    google_sub: Mapped[str | None] = mapped_column(String(255), unique=True)
+    name: Mapped[str | None] = mapped_column(String(100))
+    # NULL until the address is confirmed; an unverified account cannot log in.
+    email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (CheckConstraint("email = lower(email)", name="email_lowercase"),)
+
+
+class UserSession(Base):
+    """A login. Only the SHA-256 (hex) of the random token is stored, never the token."""
+
+    __tablename__ = "sessions"
+
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id", ondelete="CASCADE"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # Sliding expiry: bumped (at most once a day) when the session is used.
+    last_used_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    # Which kind of client logged in; lets us list and revoke devices.
+    client: Mapped[str] = mapped_column(String(16), server_default="web")
+    # A short summary of the User-Agent for the device list, not the raw header.
+    user_agent: Mapped[str | None] = mapped_column(String(200))
+
+    __table_args__ = (
+        CheckConstraint("client IN ('web', 'android', 'ios')", name="client_known"),
+        Index("ix_sessions_user_id", "user_id"),
+        # The cleanup job deletes by expiry.
+        Index("ix_sessions_expires_at", "expires_at"),
+    )
+
+
+class EmailToken(Base):
+    """A one-time link sent by mail (e-mail verification or password reset), stored hashed."""
+
+    __tablename__ = "email_tokens"
+
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id", ondelete="CASCADE"))
+    purpose: Mapped[str] = mapped_column(String(16))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # Set when the link is used; a used token never works again.
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        CheckConstraint("purpose IN ('verify', 'reset')", name="purpose_known"),
+        # One live token per user and purpose. Issuing a new one must first retire the old one
+        # (set used_at), which is also what makes "resend" invalidate the earlier link.
+        Index(
+            "uq_email_tokens_user_id_purpose_unused",
+            "user_id",
+            "purpose",
+            unique=True,
+            postgresql_where=text("used_at IS NULL"),
+        ),
+        Index("ix_email_tokens_expires_at", "expires_at"),
     )

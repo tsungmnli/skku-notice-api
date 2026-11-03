@@ -14,12 +14,12 @@ ingress가 `/api` 접두어를 **떼지 않고** 그대로 넘기므로, 앱이 
 | `/api/v1/...` | 아래 비즈니스 엔드포인트 |
 | `/api/docs`, `/api/openapi.json` | `DOCS_ENABLED=true`일 때만 |
 
-프론트 `NEXT_PUBLIC_API_BASE`는 `https://<host>/api/v1` 입니다 (개발 기본값 `http://127.0.0.1:8000/api/v1`).
+프론트 `NEXT_PUBLIC_API_BASE`는 `https://<host>/api/v1` 입니다 (개발 기본값 `http://localhost:8000/api/v1` — 아래 "개발 환경"의 쿠키 규칙 때문에 `127.0.0.1`이 아니라 `localhost`).
 
 ## 공통
 
 - 필드는 snake_case, 날짜는 `YYYY-MM-DD`, 시각은 ISO 8601 + `+09:00` (Asia/Seoul).
-- 에러 본문은 항상 `{"detail": "<한국어 메시지>"}` 문자열 한 개. (프론트가 본문을 그대로 사용자에게 보여 줍니다.)
+- 에러 본문의 `detail`은 항상 한국어 메시지 문자열 한 개입니다. (프론트가 그대로 사용자에게 보여 줍니다.) 계정 기능(`/auth`, `/me`)의 에러에는 프론트가 분기에 쓰는 기계용 `code`가 함께 옵니다: `{"detail": "<메시지>", "code": "<코드>"}`. 읽기 API의 에러에는 `code`가 없습니다. (자세한 코드 목록은 아래 "계정" 절)
 - 검증 실패는 HTTP 422, 없는 리소스는 404.
 
 ## 타입
@@ -123,3 +123,124 @@ LookupResponse = { items: Article[]; missing_ids: number[] }
 - `UID`는 마감이 `article-<id>@skku-notice`, 행사일이 `article-<id>-event@skku-notice`로 고정. 마감이 바뀌어도 UID가 같아서 구독자 캘린더에서 이벤트가 갱신됩니다 (중복 생성 안 됨). 글이 사라지거나 마감이 없어지면 피드에서 빠지고 캘린더 앱이 삭제합니다.
 - `DTSTAMP`/`LAST-MODIFIED`는 글 행의 `updated_at`. 같은 데이터면 응답이 항상 같은 바이트입니다.
 - `Cache-Control: public, max-age=300`. 구글 캘린더의 실제 갱신 주기는 구글이 정하며(대체로 하루 단위), 피드의 `REFRESH-INTERVAL`은 힌트일 뿐입니다.
+
+# 계정 (이메일·Google)
+
+서버가 정의한 계약입니다 (프론트의 mock에는 없던 부분이라, 웹 화면은 이 문서를 기준으로 만듭니다). 웹이 먼저이고 앱(Android/iOS)은 나중이지만, 앱용 분기(`X-Client`, Bearer)는 이미 구현돼 있습니다.
+
+## 인증 방식
+
+| | 웹 | 앱 (나중) |
+| --- | --- | --- |
+| 로그인 후 받는 것 | `sid` 쿠키 (본문에 토큰 없음) | 응답 본문의 `token` |
+| 이후 요청 | 쿠키가 자동으로 붙음. `fetch`는 `credentials: "include"` 필요 | `Authorization: Bearer <token>` |
+| 구분 방법 | `X-Client` 헤더 없음 (또는 `web`) | `X-Client: android` 또는 `ios`. 다른 값은 400 `invalid_client` |
+
+- 쿠키 `sid`: `HttpOnly`, `SameSite=Lax`, `Path=/api`, 운영에서는 `Secure`. 웹과 API가 같은 호스트(`skkunoti.tsungmn.com`, API는 `/api`)라서 CORS 없이 동작합니다.
+- 세션은 슬라이딩 30일입니다 (`SESSION_TTL_DAYS`). 쓰면 만료가 밀리고, 갱신은 하루에 한 번만 기록합니다. 만료되면 `401 not_authenticated`입니다.
+- 세션은 이메일이 인증된 계정만 가질 수 있습니다.
+- **CSRF**: POST/PUT/PATCH/DELETE에 `Origin`이 있으면 허용된 웹 출처(`CORS_ORIGINS`, `PUBLIC_URL`)이거나 요청 대상 호스트와 같아야 합니다. 브라우저는 알아서 붙입니다. `sid` 쿠키만 있고 `Origin`도 `Authorization`도 없으면 403 `origin_not_allowed`입니다. Bearer 요청은 대상이 아닙니다.
+- **개발 환경**: 웹(`:3000`)과 API(`:8000`)가 포트만 다르면 쿠키가 붙으려면 둘 다 같은 호스트 이름이어야 합니다. `localhost`로 통일하고 `CORS_ORIGINS=http://localhost:3000`으로 맞추세요. (`127.0.0.1`과 `localhost`가 섞이면 쿠키가 안 붙습니다. Google 로그인의 개발용 콜백도 `localhost`를 씁니다.)
+- `/auth/*`와 `/me`의 응답에는 `Cache-Control: no-store`가 붙습니다.
+- 요청 본문은 64KB까지입니다. 넘으면 413 `payload_too_large`.
+
+## 타입
+
+```ts
+User = {
+  id: string                // uuid
+  email: string             // 항상 소문자
+  name: string | null
+  email_verified: boolean
+  has_password: boolean     // false면 Google로만 가입한 계정
+  google_linked: boolean
+  created_at: string        // ISO 8601 (+09:00)
+}
+LoginResponse = { user: User; token: string | null; expires_at: string }  // token은 앱(X-Client: android|ios)일 때만
+Detail = { detail: string }
+```
+
+입력 규칙: 이메일은 앞뒤 공백을 지우고 소문자로 바꿔 비교합니다 (최대 320자). 비밀번호는 가입·재설정에서 8~128자입니다. 이름은 최대 100자입니다.
+
+## 엔드포인트
+
+모두 `/api/v1` 아래입니다.
+
+| 엔드포인트 | 본문 | 성공 | 설명 |
+| --- | --- | --- | --- |
+| `POST /auth/register` | `{email, password, name?, turnstile_token?}` | 202 `Detail` | 새 이메일이면 인증 메일, 이미 가입된 이메일이면 "이미 가입됨" 안내 메일을 보냅니다. **응답은 두 경우가 같습니다.** Turnstile 실패는 400 `captcha_failed` |
+| `POST /auth/verify-email` | `{token}` | 200 `Detail` | 메일 링크의 토큰. 한 번만 쓸 수 있고 24시간 유효 |
+| `POST /auth/resend-verification` | `{email}` | 202 `Detail` | 계정이 있든 없든 같은 응답 |
+| `POST /auth/login` | `{email, password}` | 200 `LoginResponse` | 웹은 `sid` 쿠키가 설정됩니다. 미인증이면 403 `email_not_verified`. 이메일이 없는 경우와 비밀번호가 틀린 경우는 같은 401 |
+| `POST /auth/logout` | 없음 | 204 | 항상 성공합니다 (세션이 이미 죽었어도). 쿠키를 지웁니다 |
+| `POST /auth/forgot-password` | `{email}` | 202 `Detail` | 계정이 있든 없든 같은 응답. 인증된 계정에는 재설정 메일, 미인증 계정에는 인증 메일이 갑니다 |
+| `POST /auth/reset-password` | `{token, password}` | 200 `Detail` | 토큰은 1회용, 1시간 유효. **모든 기기의 세션이 로그아웃됩니다.** 로그인은 새로 해야 합니다 |
+| `GET /auth/google?next=/경로` | 없음 | 302 → Google | 브라우저를 이동시키는 용도 (`fetch`가 아니라 `window.location`). `next`는 이 사이트 안의 경로만 허용하고, 아니면 `/`로 대체합니다 |
+| `GET /auth/google/callback` | (Google이 호출) | 303 → 웹 | 성공하면 `sid` 쿠키를 설정하고 `PUBLIC_URL` + `next`로 이동 |
+| `GET /me` | 없음 | 200 `User` | 로그인 확인용. 로그인이 안 됐으면 401 |
+| `DELETE /me` | `{password?}` | 204 | 아래 참고 |
+
+### 가입 후 흐름
+
+1. `register`는 항상 202입니다. 화면에는 "메일을 보냈습니다. 스팸함도 확인해 주세요" 같은 안내를 보여 주고, 계정이 있는지는 알려 주지 않습니다.
+2. 메일의 링크는 `PUBLIC_URL`의 **웹 페이지**를 가리킵니다. 그래서 웹이 이 경로를 가져야 합니다.
+   - `/verify-email?token=...`: 토큰을 `POST /auth/verify-email`로 보내고 결과를 보여 줍니다.
+   - `/reset-password?token=...`: 새 비밀번호를 받아 `POST /auth/reset-password`로 보냅니다.
+   - `/login`, `/forgot-password`: "이미 가입됨" 메일이 가리키는 곳입니다.
+3. 인증 전 로그인은 403 `email_not_verified`입니다. 웹은 이때 "인증 메일 다시 보내기"(`resend-verification`)를 보여 줍니다.
+4. 같은 주소로 인증 전에 여러 번 가입하면 **마지막에 가입한 비밀번호**가 유효합니다.
+5. 인증 링크를 다시 요청하면 이전 링크는 무효가 됩니다.
+
+### Google 로그인
+
+- 웹은 `GET /api/v1/auth/google?next=/원하는/경로`로 **페이지를 이동**시킵니다. 끝나면 사이트로 돌아오고 이미 로그인된 상태(`sid` 쿠키)입니다.
+- 실패해도 API 응답이 아니라 **리다이렉트**로 돌아옵니다: `/login?error=<코드>`. 코드는 `google_failed`(취소·만료·교환 실패), `google_unverified`(Google이 이메일을 인증된 것으로 보증하지 않음), `google_conflict`(그 이메일이 이미 다른 Google 계정과 연결됨), `google_disabled`(서버에 Google 로그인이 설정되어 있지 않음)입니다.
+- Google이 설정되지 않은 서버에서도 404 JSON이 아니라 `/login?error=google_disabled` 리다이렉트로 돌아옵니다. 프론트는 이 버튼을 숨길 방법이 없으므로(설정 조회 API 없음), 눌렀을 때 사용자가 JSON 화면이 아니라 안내 문구를 보게 하려는 것입니다.
+- 같은 이메일로 가입한 **인증된** 계정이 있으면 그 계정에 Google을 연결하고 비밀번호는 그대로 둡니다. **인증 전** 계정이면 비밀번호와 세션을 폐기하고 Google 계정으로 넘깁니다.
+- Google로만 가입한 계정(`has_password: false`)은 이메일 로그인이 안 됩니다. `forgot-password`로 비밀번호를 만들 수 있습니다.
+
+### 계정 삭제 (`DELETE /me`)
+
+- 비밀번호가 있는 계정: 본문 `{"password": "..."}`가 필요합니다. 없거나 틀리면 403 `invalid_credentials`이고, 15분에 5번 틀리면 429입니다.
+- Google 전용 계정: 본문이 없어도 되지만 **로그인한 지 10분 이내**여야 합니다. 아니면 403 `reauth_required` (다시 로그인하라고 안내).
+- 성공하면 204이고 세션·토큰이 함께 삭제되며 쿠키가 지워집니다. 같은 이메일로 다시 가입할 수 있습니다.
+- 본문이 있는 DELETE이므로 `fetch(url, { method: "DELETE", body, headers: {"Content-Type": "application/json"} })`로 보냅니다.
+
+## 에러 코드
+
+| 상태 | `code` | 의미 |
+| --- | --- | --- |
+| 400 | `invalid_token` | 메일 링크가 없거나 이미 썼거나 만료됨 |
+| 400 | `captcha_failed` | Turnstile 확인 실패 (가입) |
+| 400 | `invalid_client` | `X-Client`가 `web`, `android`, `ios`가 아님 |
+| 401 | `not_authenticated` | 로그인이 필요함, 또는 세션이 만료됨 |
+| 401 | `invalid_credentials` | 이메일 또는 비밀번호가 틀림 (로그인) |
+| 403 | `email_not_verified` | 이메일 인증 전 로그인 |
+| 403 | `invalid_credentials` | 계정 삭제 시 비밀번호가 틀림 |
+| 403 | `reauth_required` | Google 전용 계정이 삭제하려면 다시 로그인해야 함 |
+| 403 | `origin_not_allowed` | 허용되지 않은 `Origin`, 또는 쿠키 요청에 `Origin`이 없음 |
+| 409 | `google_conflict` | 이메일이 이미 다른 Google 계정에 연결됨 |
+| 413 | `payload_too_large` | 본문이 64KB를 넘음 (청크 전송으로 넘으면 `detail`만 옴) |
+| 422 | (없음) | 입력 검증 실패. `detail`에 첫 오류 한 줄 |
+| 429 | `rate_limited` | 요청이 너무 많음. `Retry-After` 헤더(초)가 붙음 |
+
+## 속도 제한
+
+프로세스 메모리 기반의 보조 장치입니다 (재시작하거나 replica가 늘면 약해짐). 1차 방어는 ingress/Cloudflare입니다. 프론트는 429를 받으면 `Retry-After`만큼 기다리게 하면 됩니다.
+
+| 대상 | 한도 |
+| --- | --- |
+| 로그인 실패 | `(이메일, IP)`당 15분에 10회. 이메일 단독은 15분에 30회, IP 단독은 15분에 50회 |
+| 가입 | IP당 시간당 5회 |
+| 메일을 보내는 요청 (가입·재발송·비밀번호 찾기) | 이메일당 시간당 3회, IP당 시간당 10회. 계정이 있는지와 관계없이 센다 |
+| 인증·재설정 링크 사용 | IP당 시간당 30회 |
+| Google 로그인 시작 | IP당 시간당 60회 |
+| 계정 삭제 비밀번호 실패 | 계정당 15분에 5회 |
+
+실패한 로그인만 센다는 점이 중요합니다. `(이메일, IP)` 기준이라서 남이 내 이메일로 틀려도 다른 IP의 나는 로그인할 수 있습니다.
+
+## 아직 없는 것 (다음 단계)
+
+- 즐겨찾기 서버 저장 (`/me/favorites`, localStorage 가져오기), 사용자별 캘린더 토큰 URL.
+- 앱용 `POST /auth/google/token` (네이티브 Google ID 토큰). 웹 콜백과 같은 `upsert_google_user`를 쓸 예정입니다.
+- 푸시 토큰, 키워드 알림.

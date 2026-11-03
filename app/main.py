@@ -1,3 +1,4 @@
+import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
@@ -5,12 +6,35 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.middleware.sessions import SessionMiddleware
 
+from app.auth.errors import AuthError, auth_error_handler
+from app.auth.google import build_oauth
+from app.auth.limiter import RateLimiter
+from app.auth.mail import Mailer
 from app.config import API_PREFIX, Settings, get_settings
 from app.db import database_check, make_engine, make_sessionmaker
+from app.middleware import (
+    BodyLimitMiddleware,
+    NoStoreMiddleware,
+    OriginCheckMiddleware,
+    web_origins,
+)
 from app.routers import health, v1
 
 ReadinessCheck = Callable[[], Awaitable[None]]
+
+
+def configure_logging() -> None:
+    """Show the app's own INFO logs. uvicorn only sets up its own loggers, so without this the
+    dev mailer's "mail not sent" line (the only place the verify/reset link appears when
+    SMTP_HOST is unset) is silently dropped. Safe to call repeatedly (one handler)."""
+    app_logger = logging.getLogger("app")
+    if not app_logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
+        app_logger.addHandler(handler)
+    app_logger.setLevel(logging.INFO)
 
 
 async def validation_error_handler(_: Request, exc: RequestValidationError) -> JSONResponse:
@@ -28,6 +52,7 @@ async def validation_error_handler(_: Request, exc: RequestValidationError) -> J
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
+    configure_logging()
     settings = settings or get_settings()
 
     # The engine is lazy (no connection until the first query), so building it is cheap
@@ -52,16 +77,43 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.sessionmaker = make_sessionmaker(engine) if engine else None
     # Dependencies register an async check here; /readyz runs them all.
     app.state.readiness_checks = []  # list[ReadinessCheck]
+    # Per app (not module globals), so tests never share rate-limit counters or a mailer.
+    app.state.limiter = RateLimiter()
+    app.state.mailer = Mailer(settings)
+    app.state.oauth = build_oauth(settings)  # None unless Google sign-in is configured
     if engine is not None:
         app.state.readiness_checks.append(database_check(engine))
 
+    # Each add_middleware wraps the ones added before it: the body limit sits innermost, CORS
+    # outside the rest so that even our 403/413 answers carry the CORS headers.
+    app.add_middleware(BodyLimitMiddleware)
+    app.add_middleware(NoStoreMiddleware)
+    app.add_middleware(
+        OriginCheckMiddleware,
+        allowed_origins=web_origins(settings.cors_origins, settings.public_url),
+    )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
-        allow_methods=["GET", "POST"],
-        allow_headers=["Content-Type"],
+        allow_credentials=True,  # the web app sends the `sid` cookie
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+        allow_headers=["Content-Type", "Authorization", "X-Client"],
+        expose_headers=["Retry-After"],
     )
+    if app.state.oauth is not None:
+        # Holds only the short-lived OAuth state/nonce during the Google round trip; the
+        # login itself is the separate `sid` cookie. Scoped to the Google routes.
+        app.add_middleware(
+            SessionMiddleware,
+            secret_key=settings.session_secret,
+            session_cookie="oauth_state",
+            path=f"{API_PREFIX}/v1/auth/google",
+            max_age=600,
+            same_site="lax",
+            https_only=settings.app_env == "prod",
+        )
     app.add_exception_handler(RequestValidationError, validation_error_handler)
+    app.add_exception_handler(AuthError, auth_error_handler)
 
     app.include_router(health.router, prefix=API_PREFIX)
     app.include_router(v1.router, prefix=f"{API_PREFIX}/v1")
