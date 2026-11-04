@@ -25,6 +25,8 @@ REGISTER_PER_IP = (5, HOUR)
 VERIFY_TOKEN_PER_IP = (30, HOUR)
 RESET_PER_IP = (30, HOUR)
 DELETE_FAIL_PER_USER = (5, 15 * MINUTE)
+# Saving settings. The web waits a moment after the last change, so this is far above real use.
+PREFERENCES_PER_USER = (120, HOUR)
 
 
 def enforce(limiter: RateLimiter, key: str, policy: tuple[int, int]) -> None:

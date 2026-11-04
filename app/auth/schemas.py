@@ -8,6 +8,7 @@ from typing import Annotated
 from pydantic import AfterValidator, BaseModel, Field, StringConstraints, field_serializer
 
 from app.auth.passwords import MAX_LENGTH, MIN_LENGTH
+from app.auth.preferences import Preferences
 from app.timeutil import KST
 
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -64,6 +65,7 @@ class UserOut(BaseModel):
     has_password: bool
     google_linked: bool
     created_at: datetime
+    preferences: Preferences = Field(default_factory=Preferences)
 
     @field_serializer("created_at")
     def _as_seoul_iso(self, value: datetime) -> str:

@@ -155,6 +155,12 @@ User = {
   has_password: boolean     // false면 Google로만 가입한 계정
   google_linked: boolean
   created_at: string        // ISO 8601 (+09:00)
+  preferences: Preferences  // 계정에 저장된 설정. 저장한 적이 없으면 각 섹션이 null
+}
+Preferences = { calendar: CalendarPrefs | null }
+CalendarPrefs = {
+  hidden_categories: string[]   // 사용자가 **끈** 카테고리 코드. 새 카테고리는 기본으로 켜지도록 켠 것이 아니라 끈 것을 저장
+  favorites_only: boolean
 }
 LoginResponse = { user: User; token: string | null; expires_at: string }  // token은 앱(X-Client: android|ios)일 때만
 Detail = { detail: string }
@@ -178,6 +184,7 @@ Detail = { detail: string }
 | `GET /auth/google?next=/경로` | 없음 | 302 → Google | 브라우저를 이동시키는 용도 (`fetch`가 아니라 `window.location`). `next`는 이 사이트 안의 경로만 허용하고, 아니면 `/`로 대체합니다 |
 | `GET /auth/google/callback` | (Google이 호출) | 303 → 웹 | 성공하면 `sid` 쿠키를 설정하고 `PUBLIC_URL` + `next`로 이동 |
 | `GET /me` | 없음 | 200 `User` | 로그인 확인용. 로그인이 안 됐으면 401 |
+| `PATCH /me/preferences` | `{calendar?: CalendarPrefs \| null}` | 200 `Preferences` | 계정 설정 저장. 본문에 **있는** 키는 그 섹션을 통째로 바꾸고, `null`이면 초기화하며, 없는 키는 그대로 둡니다. 코드는 영문 소문자·숫자·`_`·`-` 최대 32자, 최대 20개(중복은 지우고 정렬해서 저장). 잘못된 값은 422. 계정당 시간당 120회 |
 | `DELETE /me` | `{password?}` | 204 | 아래 참고 |
 
 ### 가입 후 흐름

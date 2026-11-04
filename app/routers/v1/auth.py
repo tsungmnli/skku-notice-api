@@ -29,6 +29,7 @@ from app.auth.errors import AuthError
 from app.auth.limiter import RateLimiter
 from app.auth.mail import Mailer, MailError
 from app.auth.passwords import hash_password, needs_rehash, verify_password
+from app.auth.preferences import load_preferences
 from app.auth.schemas import (
     Detail,
     EmailIn,
@@ -75,6 +76,7 @@ def user_out(user: User) -> UserOut:
         has_password=user.password_hash is not None,
         google_linked=user.google_sub is not None,
         created_at=user.created_at,
+        preferences=load_preferences(user.preferences),
     )
 
 

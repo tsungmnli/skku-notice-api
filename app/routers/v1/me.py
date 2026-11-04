@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, Response
-from sqlalchemy import delete
+from sqlalchemy import delete, update
 from sqlalchemy.orm import Session
 
 from app.auth import limits
@@ -12,6 +12,12 @@ from app.auth.deps import Auth, current_auth, get_app_settings, get_limiter
 from app.auth.errors import AuthError
 from app.auth.limiter import RateLimiter
 from app.auth.passwords import verify_password
+from app.auth.preferences import (
+    Preferences,
+    PreferencesPatch,
+    apply_patch,
+    load_preferences,
+)
 from app.auth.schemas import DeleteIn, UserOut
 from app.config import Settings
 from app.db import get_session
@@ -28,6 +34,22 @@ RECENT_LOGIN = timedelta(minutes=10)
 @router.get("", response_model=UserOut)
 def get_me(auth: Annotated[Auth, Depends(current_auth)]):
     return user_out(auth.user)
+
+
+@router.patch("/preferences", response_model=Preferences)
+def update_preferences(
+    patch: PreferencesPatch,
+    auth: Annotated[Auth, Depends(current_auth)],
+    db: Annotated[Session, Depends(get_session)],
+    limiter: Annotated[RateLimiter, Depends(get_limiter)],
+):
+    """Save settings that follow the account (calendar filters). A key that is present replaces
+    its section, `null` resets it, an absent key is left alone. Answers with the stored result."""
+    limits.enforce(limiter, f"prefs:{auth.user.id}", limits.PREFERENCES_PER_USER)
+    stored = apply_patch(auth.user.preferences, patch)
+    db.execute(update(User).where(User.id == auth.user.id).values(preferences=stored))
+    db.commit()
+    return load_preferences(stored)
 
 
 @router.delete("", status_code=204)

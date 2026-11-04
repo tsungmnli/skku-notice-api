@@ -49,7 +49,7 @@ articles(id PK, article_no UNIQUE, title, writer, posted_on, display_no, is_pinn
 article_categories(article_id → articles ON DELETE CASCADE,
                    category_code → categories ON DELETE RESTRICT)   -- PK(article_id, category_code)
 users(id uuid PK, email UNIQUE, password_hash, google_sub UNIQUE, name,
-      email_verified_at timestamptz, created_at)
+      email_verified_at timestamptz, created_at, preferences jsonb NOT NULL DEFAULT '{}')
 sessions(token_hash PK, user_id → users ON DELETE CASCADE, created_at, expires_at,
          last_used_at, client, user_agent)
 email_tokens(token_hash PK, user_id → users ON DELETE CASCADE, purpose, created_at,
@@ -58,6 +58,7 @@ email_tokens(token_hash PK, user_id → users ON DELETE CASCADE, purpose, create
 
 - 계정 테이블: `users.email` 은 항상 소문자(CHECK)라서 UNIQUE가 대소문자를 구분하지 않습니다.
   `password_hash` 가 NULL이면 Google로만 가입한 계정입니다. `email_verified_at` 이 NULL이면 로그인할 수 없습니다.
+- `users.preferences` 는 기기를 오가는 설정(캘린더 필터)을 담은 JSON 한 덩어리입니다. 스키마는 `app/auth/preferences.py` 가 정하고, 읽을 때는 못 읽는 섹션을 버리고 쓸 때는 엄격하게 검사합니다. 컬럼이 NOT NULL + 기본값이라 이전 버전 API 가 돌아가는 중에 마이그레이션해도 안전합니다.
 - `sessions.token_hash`, `email_tokens.token_hash` 는 무작위 토큰의 SHA-256(hex)만 저장합니다. 토큰 원문은 DB에 없습니다.
   `sessions.client` 는 `web`/`android`/`ios` 중 하나입니다.
 - `email_tokens` 는 (user, purpose)당 **미사용** 토큰이 하나만 있을 수 있습니다(부분 유니크 인덱스).

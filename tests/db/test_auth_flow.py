@@ -434,3 +434,67 @@ def test_google_account_must_sign_in_again_to_delete_later(env):
     r = _delete(env, headers=bearer)
     assert r.status_code == 403 and r.json()["code"] == "reauth_required"
     assert env.db_count(User) == 1
+
+
+# --- 6. settings that follow the account ----------------------------------------------------
+
+
+def _patch_prefs(env, body: dict, **kw):
+    return env.client.patch("/api/v1/me/preferences", json=body, **kw)
+
+
+def test_new_account_has_no_saved_preferences(env):
+    env.signed_up()
+    env.login()
+    assert env.client.get("/api/v1/me").json()["preferences"] == {"calendar": None}
+
+
+def test_preferences_are_saved_and_come_back_with_me(env):
+    env.signed_up()
+    env.login()
+    r = _patch_prefs(env, {"calendar": {"hidden_categories": ["career", "academic"]}})
+    assert r.status_code == 200
+    want = {"calendar": {"hidden_categories": ["academic", "career"], "favorites_only": False}}
+    assert r.json() == want
+    assert env.client.get("/api/v1/me").json()["preferences"] == want
+
+    # They belong to the account, not the browser: a new login sees them.
+    env.post("/auth/logout")
+    env.login()
+    assert env.client.get("/api/v1/me").json()["preferences"] == want
+
+
+def test_null_resets_preferences(env):
+    env.signed_up()
+    env.login()
+    _patch_prefs(env, {"calendar": {"favorites_only": True}})
+    assert _patch_prefs(env, {"calendar": None}).json() == {"calendar": None}
+    assert env.client.get("/api/v1/me").json()["preferences"] == {"calendar": None}
+
+
+def test_invalid_preferences_are_refused_and_change_nothing(env):
+    env.signed_up()
+    env.login()
+    good = {"calendar": {"hidden_categories": ["career"]}}
+    assert _patch_prefs(env, good).status_code == 200
+    assert _patch_prefs(env, {"calendar": {"hidden_categories": ["Bad Code"]}}).status_code == 422
+    assert env.client.get("/api/v1/me").json()["preferences"]["calendar"]["hidden_categories"] == [
+        "career"
+    ]
+
+
+def test_preferences_need_a_login_and_a_known_origin(env):
+    assert _patch_prefs(env, {"calendar": None}).status_code == 401
+    env.signed_up()
+    env.login()
+    foreign = _patch_prefs(env, {"calendar": None}, headers={"Origin": "https://evil.example"})
+    assert foreign.status_code == 403 and foreign.json()["code"] == "origin_not_allowed"
+
+
+def test_saving_preferences_is_limited(env):
+    env.signed_up()
+    env.login()
+    codes = [
+        _patch_prefs(env, {"calendar": {"favorites_only": True}}).status_code for _ in range(121)
+    ]
+    assert codes[:120] == [200] * 120 and codes[120] == 429

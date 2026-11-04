@@ -19,6 +19,7 @@ from sqlalchemy import (
     func,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 # Stable constraint names keep Alembic migrations deterministic.
@@ -114,6 +115,10 @@ class User(Base):
     # NULL until the address is confirmed; an unverified account cannot log in.
     email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Settings that follow the user between devices (see app/auth/preferences.py).
+    preferences: Mapped[dict] = mapped_column(
+        JSONB, default=dict, server_default=text("'{}'::jsonb")
+    )
 
     __table_args__ = (CheckConstraint("email = lower(email)", name="email_lowercase"),)
 
