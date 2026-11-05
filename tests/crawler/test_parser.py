@@ -105,3 +105,28 @@ def test_row_without_category_is_general():
 def test_url_helpers():
     assert article_url(5).endswith("notice01.do?mode=view&articleNo=5")
     assert list_page_url(20).endswith("notice01.do?mode=list&articleLimit=10&article.offset=20")
+
+
+def test_a_row_without_a_category_column_does_not_warn(caplog):
+    html = (
+        '<ul class="board-list-wrap"><li><dl><dt class="board-list-content-title">'
+        '<a href="?mode=view&amp;articleNo=2">제목</a></dt>'
+        '<dd class="board-list-content-info"><ul><li>No.2</li><li>팀</li>'
+        "<li>2026-10-01</li><li>조회수<span>1</span></li></ul></dd></dl></li></ul>"
+    )
+    parse_list(html)
+    assert "unknown board category label" not in caplog.text
+
+
+def test_url_helpers_take_another_boards_address():
+    cse = "https://cse.skku.edu/cse/notice.do"
+    assert article_url(5, cse) == f"{cse}?mode=view&articleNo=5"
+    assert list_page_url(20, list_url=cse) == f"{cse}?mode=list&articleLimit=10&article.offset=20"
+
+
+def test_row_urls_follow_the_list_url_given():
+    cse = "https://cse.skku.edu/cse/notice.do"
+    rows = parse_list(FIXTURE.read_text(encoding="utf-8"), cse)
+    assert all(r.url == f"{cse}?mode=view&articleNo={r.article_no}" for r in rows)
+    # Without it, rows keep pointing at the campus board.
+    assert all("notice01.do" in r.url for r in parse_list(FIXTURE.read_text(encoding="utf-8")))

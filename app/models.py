@@ -15,6 +15,7 @@ from sqlalchemy import (
     String,
     Table,
     Text,
+    UniqueConstraint,
     Uuid,
     func,
     text,
@@ -45,6 +46,42 @@ class Category(Base):
     sort_order: Mapped[int] = mapped_column(SmallInteger, default=0, server_default="0")
 
 
+class Department(Base):
+    """What a student picks in the UI (a department or college). One department can own several
+    boards: the global convergence school (sco) has a common one plus one per major."""
+
+    __tablename__ = "departments"
+
+    code: Mapped[str] = mapped_column(String(32), primary_key=True)
+    name: Mapped[str] = mapped_column(String(64))
+    sort_order: Mapped[int] = mapped_column(SmallInteger, default=0, server_default="0")
+
+
+class Source(Base):
+    """One notice board the crawler reads. Id 1 is the campus-wide board, which every article
+    that existed before sources were introduced belongs to (see migration 0006)."""
+
+    __tablename__ = "sources"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # Stable handle used in config and URLs, e.g. 'skku', 'sw', 'sco-major-data'.
+    slug: Mapped[str] = mapped_column(String(48), unique=True)
+    department_code: Mapped[str] = mapped_column(
+        ForeignKey("departments.code", ondelete="RESTRICT")
+    )
+    # The board's own title, e.g. '공지사항', '데이터사이언스융합전공'.
+    name: Mapped[str] = mapped_column(String(64))
+    # The board's list page without a query string; view links and paging are built on it.
+    list_url: Mapped[str] = mapped_column(Text)
+    level: Mapped[str] = mapped_column(String(16))
+    # A disabled source keeps its articles but is skipped by the crawler.
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("true"))
+    sort_order: Mapped[int] = mapped_column(SmallInteger, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (CheckConstraint("level IN ('all', 'undergrad', 'grad')", name="level"),)
+
+
 article_categories = Table(
     "article_categories",
     Base.metadata,
@@ -59,8 +96,14 @@ class Article(Base):
     __tablename__ = "articles"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    # The school board's own post number; the crawler upserts on it.
-    article_no: Mapped[int] = mapped_column(Integer, unique=True)
+    # Which board the post is on. The server default (the campus-wide board) lets the previous
+    # release, which does not know this column, keep inserting while 0006 is already applied.
+    source_id: Mapped[int] = mapped_column(
+        ForeignKey("sources.id", ondelete="RESTRICT"), server_default="1"
+    )
+    # The school board's own post number. Boards number their posts independently, so the key is
+    # (source_id, article_no) (see the unique constraint below), never the number alone.
+    article_no: Mapped[int] = mapped_column(Integer)
     title: Mapped[str] = mapped_column(Text)
     writer: Mapped[str] = mapped_column(String(100))
     posted_on: Mapped[date] = mapped_column(Date)
@@ -78,6 +121,15 @@ class Article(Base):
     deadline_evidence: Mapped[str | None] = mapped_column(String(100))
     # Set once the detail page has been fetched and read, so it is not requested again.
     detail_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # When the crawler last saw the post's content change (today: its title). This is what the
+    # UPDATED badge hangs on, so view counts, pinning and re-reading rules never touch it.
+    # NULL = never seen changed; readers then fall back to `posted_on`.
+    content_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # When `view_count` was last rewritten. Views only grow, so writing every crawl would update
+    # the row each time; the crawler refreshes them at most once a day (see crawler/store.py).
+    view_count_synced_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -86,8 +138,13 @@ class Article(Base):
     categories: Mapped[list[Category]] = relationship(
         secondary=article_categories, order_by=Category.sort_order, lazy="selectin"
     )
+    # The board row, read in the same query as the article (an inner join: `source_id` is NOT
+    # NULL), so serving a page of articles costs no extra query per post. `ArticleOut` reads
+    # the board's slug and its department from it.
+    source: Mapped[Source] = relationship(lazy="joined", innerjoin=True)
 
     __table_args__ = (
+        UniqueConstraint("source_id", "article_no", name="uq_articles_source_id_article_no"),
         Index("ix_articles_posted_on_id", "posted_on", "id"),
         Index("ix_articles_writer", "writer"),
         # Calendar and deadline sorting only look at articles that have a deadline.
@@ -121,6 +178,26 @@ class User(Base):
     )
 
     __table_args__ = (CheckConstraint("email = lower(email)", name="email_lowercase"),)
+
+
+class UserArticleRead(Base):
+    """A signed-in user opened this notice. Drives the NEW / UPDATED badges across devices.
+
+    Only notices still inside their display window are kept (see app/freshness.py): a row is
+    refused when the notice is already past it and the crawler's housekeeping deletes it when it
+    gets there, so the table stays small however long an account lives.
+    """
+
+    __tablename__ = "user_article_reads"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    article_id: Mapped[int] = mapped_column(
+        ForeignKey("articles.id", ondelete="CASCADE"), primary_key=True
+    )
+    # The latest time the user opened it. UPDATED compares this with `content_changed_at`.
+    read_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class UserSession(Base):

@@ -8,7 +8,6 @@ from sqlalchemy.orm import Session
 from app.models import Article, Category
 from app.timeutil import KST
 from tests.db import reference
-from tests.db.conftest import NOW
 
 URL = "/api/v1"
 ROWS = reference.dataset()
@@ -41,6 +40,9 @@ def test_article_json_matches_types_ts(api):
     assert res.json() == {
         "id": 2,
         "article_no": 1001,
+        # The seed is all campus-wide posts: board and department are both `skku`.
+        "source": "skku",
+        "department": "skku",
         "title": "입학설명회 개최 안내 (1001)",
         "writer": "학사지원팀",
         "posted_on": "2026-02-02",
@@ -53,6 +55,7 @@ def test_article_json_matches_types_ts(api):
         "deadline_at": "2026-10-06T17:00:00+09:00",
         "event_at": None,
         "deadline_source": None,
+        "content_changed_at": None,
     }
 
 
@@ -76,9 +79,9 @@ def test_list_envelope_and_item_keys(api):
     body = api.get(f"{URL}/articles", params={"size": 3}).json()
     assert list(body) == ["items", "total", "page", "size", "has_next"]
     assert set(body["items"][0]) == {
-        "id", "article_no", "title", "writer", "posted_on", "display_no",
-        "is_pinned", "view_count", "url", "categories", "deadline_at", "event_at",
-        "deadline_source",
+        "id", "article_no", "source", "department", "title", "writer", "posted_on",
+        "display_no", "is_pinned", "view_count", "url", "categories", "deadline_at",
+        "event_at", "deadline_source", "content_changed_at",
     }  # fmt: skip
     assert (body["total"], body["page"], body["size"], body["has_next"]) == (36, 1, 3, True)
 
@@ -320,9 +323,3 @@ def test_writers_limit_is_clamped_to_1_200(api):
     assert len(api.get(f"{URL}/writers", params={"limit": 3}).json()) == 3
     assert len(api.get(f"{URL}/writers", params={"limit": 0}).json()) == 1
     assert len(api.get(f"{URL}/writers", params={"limit": 5000}).json()) == 10
-
-
-def test_fixed_clock_is_the_test_clock(api):
-    # Sanity: the shared client really runs at NOW, which the parity expectations depend on.
-    res = api.get(f"{URL}/articles", params={"sort": "deadline_asc", "size": 50}).json()
-    assert min(a["deadline_at"] for a in res["items"]) >= NOW.date().isoformat()

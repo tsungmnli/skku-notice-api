@@ -21,13 +21,16 @@ ingress가 `/api` 접두어를 **떼지 않고** 그대로 넘기므로, 앱이 
 - 필드는 snake_case, 날짜는 `YYYY-MM-DD`, 시각은 ISO 8601 + `+09:00` (Asia/Seoul).
 - 에러 본문의 `detail`은 항상 한국어 메시지 문자열 한 개입니다. (프론트가 그대로 사용자에게 보여 줍니다.) 계정 기능(`/auth`, `/me`)의 에러에는 프론트가 분기에 쓰는 기계용 `code`가 함께 옵니다: `{"detail": "<메시지>", "code": "<코드>"}`. 읽기 API의 에러에는 `code`가 없습니다. (자세한 코드 목록은 아래 "계정" 절)
 - 검증 실패는 HTTP 422, 없는 리소스는 404.
+- 공개 읽기(`GET /articles`, `/articles/{id}`, `/categories`, `/departments`, `/writers`)의 **성공** 응답에는 `Cache-Control: public, max-age=60`이 붙습니다. 누구에게나 같은 응답이라(NEW/UPDATED는 웹이 계산) 브라우저와 Cloudflare가 1분간 보관해도 됩니다. 오류(404, 422)에는 붙지 않습니다. `POST /articles/lookup`, `/auth/*`, `/me/*`는 캐시하지 마세요(뒤의 둘은 `no-store`). `/calendar`는 따로 5분입니다.
 
 ## 타입
 
 ```ts
 Article = {
   id: number            // DB 기본키 (프론트가 즐겨찾기에 저장하는 값)
-  article_no: number    // 학교 게시판의 글 번호
+  article_no: number    // 학교 게시판의 글 번호. 게시판마다 따로 매기므로 (source, article_no)가 유일하고 article_no만으로는 유일하지 않음
+  source: string        // 글이 올라온 게시판의 slug (예: "skku", "sco-data"). GET /departments의 sources[].slug와 같은 값
+  department: string    // 그 게시판이 속한 학과의 code (예: "skku", "sco"). 학교 전체 공지는 source, department 모두 "skku"
   title: string
   writer: string
   posted_on: string     // "YYYY-MM-DD"
@@ -39,9 +42,12 @@ Article = {
   deadline_at: string | null
   event_at: string | null           // 행사/근무일 (마감 아님). 시각을 알면 ISO 8601, 모르면 날짜만("2026-11-20"). 정렬·필터에 쓰이지 않음
   deadline_source: "title" | "body" | null  // deadline_at을 읽은 곳. 마감이 없으면 null
+  content_changed_at: string | null // 크롤러가 글이 수정된 것을 본 시각 (ISO 8601 +09:00). 바뀐 적 없으면 null. UPDATED 표시용 (아래 "NEW / UPDATED 표시")
 }
 ArticleListResponse = { items: Article[]; total: number; page: number; size: number; has_next: boolean }
 Category = { code: string; name: string; count: number }
+Source = { slug: string; name: string; level: "all" | "undergrad" | "grad"; count: number }   // 게시판 하나
+Department = { code: string; name: string; count: number; sources: Source[] }   // count = 소속 게시판 글 수의 합
 Writer = { writer: string; count: number }
 LookupResponse = { items: Article[]; missing_ids: number[] }
 ```
@@ -59,6 +65,8 @@ LookupResponse = { items: Article[]; missing_ids: number[] }
 | `q` | 공백으로 나눈 모든 단어가 (제목 + 작성자 + 카테고리 이름)에 포함 (AND, 대소문자 무시). 최대 100자. `%`, `_`, `\`는 문자 그대로 검색 |
 | `category` | 반복 가능 (`category=a&category=b`). 하나라도 일치 (OR) |
 | `writer` | 반복 가능. 정확히 일치, 하나라도 일치 (OR) |
+| `department` | 반복 가능. 학과 `code`(`GET /departments`). 그 학과의 **모든 게시판** 글 |
+| `source` | 반복 가능. 게시판 `slug` |
 | `date_from`, `date_to` | `posted_on` 범위 (양끝 포함). `from > to`면 422 `"date_from은 date_to보다 이후일 수 없습니다."` |
 | `pinned` | `include`(기본) / `exclude` / `only` |
 | `has_deadline` | `true` → 마감 있는 글만, `false` → 마감 없는 글만, 생략 → 전체 |
@@ -66,6 +74,13 @@ LookupResponse = { items: Article[]; missing_ids: number[] }
 | `sort` | `posted_desc`(기본) / `posted_asc` / `views_desc` / `deadline_asc` |
 | `page` | 1부터, 기본 1 (1~100000, 밖이면 422) |
 | `size` | 기본 20, 범위 밖이면 1~50으로 보정 |
+
+**어느 게시판의 글을 읽는가** (`/articles`, `/categories`, `/writers` 공통)
+- `department`와 `source`를 **둘 다 안 주면 학교 전체 공지(`level = 'all'`)만** 나옵니다. 학과 공지는 안 섞입니다. 학과를 고르지 않은 사람에게는 보여 줄 학과 공지가 없기 때문입니다.
+- 하나라도 주면 **주어진 학과의 게시판 + 주어진 게시판의 합집합**입니다 (OR). 이때 학교 전체 공지는 따라오지 않으니, 같이 보려면 `source=skku`를 함께 보냅니다. 예: `department=cse&source=sco-data`는 소프트웨어학과 공지와 데이터사이언스융합전공 공지를 함께 줍니다.
+- 모르는 학과 `code`나 `slug`는 오류가 아니라 결과 0건입니다.
+- 어떤 사람의 학과 선택은 서버가 아니라 클라이언트가 들고 있다가 이 파라미터로 보냅니다. 응답이 사용자마다 달라지지 않아서 공개 캐시를 그대로 쓸 수 있습니다.
+- 응답의 각 글은 자기 `source`(게시판 slug)와 `department`(학과 code)를 가지고 있습니다. 합집합으로 여러 게시판을 섞어 받아도 글마다 어느 게시판 것인지 구분할 수 있고, 학과 탭이 이 값으로 글머리에 게시판 이름을 붙입니다. `/articles/{id}`와 `POST /articles/lookup`의 글도 같습니다. 글 id로 즐겨찾기·캘린더를 쓰는 데는 영향이 없습니다.
 
 정렬 규칙
 - `posted_*`: `posted_on` 기준, 같으면 `id` 같은 방향으로 (페이지 경계에서 순서가 흔들리지 않게).
@@ -100,14 +115,72 @@ LookupResponse = { items: Article[]; missing_ids: number[] }
 
 `Category[]`. 글이 0개인 카테고리도 포함. 순서는 카테고리 정의 순서.
 
+| 쿼리 | 설명 |
+| --- | --- |
+| `department`, `source` | `GET /articles`와 같은 규칙으로 범위를 정합니다 (안 주면 학교 전체 공지). `count`는 그 범위의 글 수라서, 같은 파라미터로 목록을 부르면 `?category=<code>`의 `total`과 일치합니다 |
+
+## `GET /api/v1/departments`
+
+`Department[]`. 학생이 고르는 단위는 학과이고, 한 학과가 게시판을 여러 개 가질 수 있습니다(글로벌융합학부는 공통 공지 + 전공별 4개). 순서는 학과, 그 안의 게시판 모두 정의 순서(`app/crawler/sources.py`)입니다.
+
+- **학교 전체 공지(`level = 'all'`)는 나오지 않습니다.** 그건 아무것도 고르지 않았을 때 `GET /articles`가 보여 주는 기본 범위이지, 고르는 대상이 아닙니다.
+- **켜져 있는(`enabled`) 게시판만** 나옵니다. 게시판이 모두 꺼진 학과는 목록에 없습니다. 글이 0개인 게시판은 `count: 0`으로 나옵니다.
+- `sources` 동기화(`--sync-sources`)를 한 번도 안 했다면 빈 배열입니다.
+- `level`: `undergrad`는 학부, `grad`는 대학원입니다 (`all`은 위 이유로 나오지 않음).
+- 학과의 글은 `GET /articles?department=<code>`, 게시판 하나만 보려면 `?source=<slug>`.
+
 ## `GET /api/v1/writers`
 
 | 쿼리 | 설명 |
 | --- | --- |
 | `q` | 작성자 이름에 포함(부분 일치). 공백뿐이면 필터 없음 |
 | `limit` | 최대 개수. 생략 시 200, 1~200 밖의 값은 보정 |
+| `department`, `source` | `GET /articles`와 같은 규칙으로 범위를 정합니다 (안 주면 학교 전체 공지) |
 
 `Writer[]`. `count` 내림차순, 같으면 이름 오름차순.
+
+## NEW / UPDATED 표시
+
+서버는 표시를 계산해 내려주지 않습니다. 목록 응답이 사용자와 무관해야 캐시할 수 있기 때문입니다. 웹이 `posted_on`, `content_changed_at`, "내가 연 글" 기록으로 **직접 계산**합니다.
+
+- **"읽음"** 은 사용자가 글의 링크를 누른 것입니다 (앱이 본문을 보여주지 않으므로). 목록만 훑은 글은 읽은 것이 아닙니다.
+- **표시 기간**은 서울 날짜 기준 **7일**입니다 (오늘 포함). `windowStart = 오늘(서울) − 6일`. 서버(`app/freshness.py`)에 상수로 있고 설정으로 바꿀 수 없습니다. 웹과 서버가 같은 값을 써야 해서, 바꿀 때는 둘을 함께 배포합니다.
+- 날짜 비교는 서울 날짜입니다. `content_changed_at`은 이미 `+09:00`이라 앞 10자(`YYYY-MM-DD`)가 서울 날짜입니다.
+
+| 표시 | 조건 (위에서 아래로 처음 맞는 것) |
+| --- | --- |
+| `NEW` | `posted_on >= windowStart` 이고 읽은 기록이 없음 |
+| `UPDATED` | `content_changed_at`의 날짜 `>= windowStart` 이고, (읽은 기록이 없거나 `read_at < content_changed_at`) |
+| 없음 | 그 외 |
+
+```ts
+const isNew = (a, read) => a.posted_on >= windowStart && !read
+const isUpdated = (a, read) =>
+  a.content_changed_at != null &&
+  a.content_changed_at.slice(0, 10) >= windowStart &&
+  (!read || new Date(read.read_at) < new Date(a.content_changed_at))
+const badge = (a, read) => (isNew(a, read) ? "NEW" : isUpdated(a, read) ? "UPDATED" : null)
+```
+
+| 상황 | 표시 |
+| --- | --- |
+| 오늘 올라온 글, 아직 안 열어 봄 | `NEW` |
+| 그 글을 열어 봄 | 없음 |
+| 열어 본 뒤 제목이 바뀜 | `UPDATED` (다시 열면 없음) |
+| 이번 주에 올라온 글인데 열기 전에 제목이 바뀜 | `NEW` (아직 안 봤으니 NEW가 우선) |
+| 3주 전 글, 어제 제목이 바뀜, 열어 본 적 없음 | `UPDATED` (수정일로부터 7일) |
+| 열어 본 뒤 7일이 지남 | 없음 |
+
+**`content_changed_at`이 감지하는 것은 지금은 제목이 바뀐 경우뿐입니다.** 제목은 그대로이고 본문·첨부만 바뀐 글(학점 교류 안내처럼)은 아직 UPDATED가 되지 않습니다. 본문 변경 감지가 들어가면 같은 필드가 그 경우도 담으므로 웹은 바꿀 것이 없습니다. 조회수, 고정/해제, 마감을 다시 읽은 결과는 수정이 아닙니다. 수정 시각은 "학교가 고친 시각"이 아니라 "크롤러가 알아챈 시각"이라 크롤링 주기만큼 늦을 수 있습니다.
+
+### 읽음 기록을 어디에 두는가
+
+- **로그인 안 함**: 브라우저 `localStorage`에 `{ [article_id]: read_at(ISO) }`.
+- **로그인함**: 서버(`/me/reads`). 링크를 누를 때마다 보내지 말고 몇 초 모았다가 한 번에 `POST`하고, 탭을 닫을 때는 `navigator.sendBeacon`으로 남은 것을 보냅니다 (그래서 `PUT`이 아니라 `POST`입니다). `GET`은 로그인 직후와 탭이 다시 보일 때만 부르고 주기적으로 부르지 않습니다.
+- **로그인할 때 병합**: 로컬 기록을 `read_at`을 붙여 `POST /me/reads`로 올리고(200개씩), 이어서 `GET /me/reads`의 결과를 기준으로 삼습니다. 두 기기에서 읽어도 합집합이 되고 충돌할 일이 없습니다(서버는 글마다 **가장 늦은** `read_at`을 유지). 올린 뒤 로컬 사본은 지웁니다. 공용 PC를 생각해 로그아웃할 때도 로컬 읽음 기록을 지우는 것을 권합니다.
+- **로컬 정리**: `read_at`의 서울 날짜가 `windowStart`보다 이전인 항목은 지웁니다. 글 정보가 필요 없습니다. 그런 기록은 있든 없든 표시가 같기 때문입니다. (게시일은 읽은 날보다 늦지 않으므로 `NEW` 판정에는 창 안의 `read_at`만 쓰이고, 수정 뒤에 읽은 기록은 수정이 창 안이면 읽은 시각도 창 안입니다. 수정 *전에* 읽은 기록은 없어도 `UPDATED`입니다.)
+- 서버는 표시 기간이 끝난 글의 기록을 지우고, 이미 기간이 끝난 글이나 없는 글의 id는 **오류 없이 무시**합니다. 그래서 웹이 오래된 id를 보내도 됩니다.
+- 읽음 기록은 계정에 저장되는 개인정보입니다(글 id와 연 시각, 표시 기간이 끝나면 삭제). 웹의 `/policy` 수집 항목에 추가해 주세요.
 
 ## `GET /api/v1/calendar`
 
@@ -185,6 +258,8 @@ Detail = { detail: string }
 | `GET /auth/google/callback` | (Google이 호출) | 303 → 웹 | 성공하면 `sid` 쿠키를 설정하고 `PUBLIC_URL` + `next`로 이동 |
 | `GET /me` | 없음 | 200 `User` | 로그인 확인용. 로그인이 안 됐으면 401 |
 | `PATCH /me/preferences` | `{calendar?: CalendarPrefs \| null}` | 200 `Preferences` | 계정 설정 저장. 본문에 **있는** 키는 그 섹션을 통째로 바꾸고, `null`이면 초기화하며, 없는 키는 그대로 둡니다. 코드는 영문 소문자·숫자·`_`·`-` 최대 32자, 최대 20개(중복은 지우고 정렬해서 저장). 잘못된 값은 422. 계정당 시간당 120회 |
+| `GET /me/reads` | 없음 | 200 `{items: {article_id, read_at}[]}` | 표시 기간 안에 있는 글 중 이 계정이 연 것. `read_at`은 `+09:00`. 최신순. 페이지 없음(기간이 끝난 글은 빠지므로 크기가 제한됨) |
+| `POST /me/reads` | `{items: {article_id, read_at?}[]}` (0~200개) | 200 `{saved: number}` | 글을 열었다고 기록. 몇 번을 보내도 같고, 글마다 **가장 늦은** `read_at`을 유지합니다(더 이른 값으로 되돌리지 않음). `read_at`은 생략하면 지금, 오프셋이 없으면 422, 지금보다 미래면 지금으로 잘라 냅니다. 로그인 전에 쌓은 기록을 올릴 때만 붙이세요. `saved`는 받아들인 id 수이며, 없는 글과 표시 기간이 끝난 글은 오류 없이 건너뜁니다. `article_id`가 1~2³¹−1 밖이거나 201개 이상이면 422. 계정당 분당 60회 |
 | `DELETE /me` | `{password?}` | 204 | 아래 참고 |
 
 ### 가입 후 흐름
@@ -243,6 +318,7 @@ Detail = { detail: string }
 | 인증·재설정 링크 사용 | IP당 시간당 30회 |
 | Google 로그인 시작 | IP당 시간당 60회 |
 | 계정 삭제 비밀번호 실패 | 계정당 15분에 5회 |
+| 읽음 기록 저장 (`POST /me/reads`) | 계정당 분당 60회 |
 
 실패한 로그인만 센다는 점이 중요합니다. `(이메일, IP)` 기준이라서 남이 내 이메일로 틀려도 다른 IP의 나는 로그인할 수 있습니다.
 

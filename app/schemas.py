@@ -3,7 +3,7 @@
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, field_serializer
+from pydantic import AwareDatetime, BaseModel, Field, field_serializer
 
 from app.models import Article
 from app.timeutil import KST
@@ -16,6 +16,11 @@ DeadlineSource = Literal["title", "body"]
 class ArticleOut(BaseModel):
     id: int
     article_no: int
+    # The board the post is on (`Source.slug`, the same value as `sources[].slug` of
+    # /departments) and the department that board belongs to (`Department.code`). Campus-wide
+    # posts say `skku` for both.
+    source: str
+    department: str
     title: str
     writer: str
     posted_on: date
@@ -29,11 +34,17 @@ class ArticleOut(BaseModel):
     event_at: datetime | None
     # Where `deadline_at` was read from. The stored evidence line is for debugging, not served.
     deadline_source: DeadlineSource | None
+    # When the crawler saw the post's title change (UPDATED badge). null = never seen changed.
+    content_changed_at: datetime | None
 
     @field_serializer("deadline_at")
     def _deadline_as_seoul_iso(self, value: datetime | None) -> str | None:
         # The DB hands back timestamptz in the session zone (UTC); the contract is `+09:00`.
         # A deadline without a time of day keeps its implicit 23:59 (due at the end of that day).
+        return value.astimezone(KST).isoformat(timespec="seconds") if value else None
+
+    @field_serializer("content_changed_at")
+    def _changed_as_seoul_iso(self, value: datetime | None) -> str | None:
         return value.astimezone(KST).isoformat(timespec="seconds") if value else None
 
     @field_serializer("event_at")
@@ -52,6 +63,8 @@ class ArticleOut(BaseModel):
         return cls(
             id=a.id,
             article_no=a.article_no,
+            source=a.source.slug,
+            department=a.source.department_code,
             title=a.title,
             writer=a.writer,
             posted_on=a.posted_on,
@@ -63,6 +76,7 @@ class ArticleOut(BaseModel):
             deadline_at=a.deadline_at,
             event_at=a.event_at,
             deadline_source=a.deadline_source,
+            content_changed_at=a.content_changed_at,
         )
 
 
@@ -80,9 +94,56 @@ class CategoryOut(BaseModel):
     count: int
 
 
+class SourceOut(BaseModel):
+    slug: str
+    name: str
+    level: Literal["all", "undergrad", "grad"]
+    count: int
+
+
+class DepartmentOut(BaseModel):
+    code: str
+    name: str
+    count: int  # articles on all of its boards
+    sources: list[SourceOut]
+
+
 class WriterOut(BaseModel):
     writer: str
     count: int
+
+
+MAX_READS_PER_REQUEST = 200
+
+
+class ReadMark(BaseModel):
+    article_id: int = Field(ge=1, le=2**31 - 1)
+    # When the user opened it. Optional: the web sends it when it uploads reads it kept while
+    # signed out, which happened earlier than this request. Never later than the server's now.
+    read_at: AwareDatetime | None = None
+
+
+class ReadsIn(BaseModel):
+    items: list[ReadMark] = Field(max_length=MAX_READS_PER_REQUEST)
+
+
+class ReadOut(BaseModel):
+    article_id: int
+    read_at: datetime
+
+    @field_serializer("read_at")
+    def _read_as_seoul_iso(self, value: datetime) -> str:
+        return value.astimezone(KST).isoformat(timespec="seconds")
+
+
+class ReadsOut(BaseModel):
+    items: list[ReadOut]
+
+
+class ReadsSaved(BaseModel):
+    # How many of the sent ids were accepted. Ids that do not exist, or whose notice is already
+    # past its display window, are skipped without an error.
+    saved: int
 
 
 class LookupRequest(BaseModel):

@@ -119,7 +119,7 @@ def seed(session: Session) -> None:
     id_by_no = dict(
         session.execute(
             stmt.on_conflict_do_update(
-                index_elements=[Article.article_no],
+                index_elements=[Article.source_id, Article.article_no],
                 set_={col: getattr(stmt.excluded, col) for col in rows[0] if col != "article_no"},
             ).returning(Article.article_no, Article.id)
         ).all()

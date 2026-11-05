@@ -35,12 +35,14 @@ class ListedArticle:
     url: str
 
 
-def article_url(article_no: int) -> str:
-    return f"{BOARD_URL}?mode=view&articleNo={article_no}"
+def article_url(article_no: int, list_url: str = BOARD_URL) -> str:
+    """The view page of a post. Every board (the campus one and each department's) uses the same
+    `?mode=view&articleNo=` query on its own list page address."""
+    return f"{list_url}?mode=view&articleNo={article_no}"
 
 
-def list_page_url(offset: int, limit: int = 10) -> str:
-    return f"{BOARD_URL}?mode=list&articleLimit={limit}&article.offset={offset}"
+def list_page_url(offset: int, limit: int = 10, list_url: str = BOARD_URL) -> str:
+    return f"{list_url}?mode=list&articleLimit={limit}&article.offset={offset}"
 
 
 def clean_text(value: str) -> str:
@@ -49,7 +51,7 @@ def clean_text(value: str) -> str:
     return " ".join(value.split())
 
 
-def _parse_row(li: Tag) -> ListedArticle:
+def _parse_row(li: Tag, list_url: str) -> ListedArticle:
     dt = li.select_one("dt.board-list-content-title")
     link = dt.select_one("a[href]") if dt else None
     if dt is None or link is None:
@@ -82,12 +84,16 @@ def _parse_row(li: Tag) -> ListedArticle:
         is_pinned="board-list-content-top" in (dt.get("class") or []),
         view_count=int(views.group().replace(",", "")) if views else None,
         has_attachment=li.select_one(".board-list-file") is not None,
-        url=article_url(int(m.group(1))),
+        url=article_url(int(m.group(1)), list_url),
     )
 
 
-def parse_list(html: str) -> list[ListedArticle]:
+def parse_list(html: str, list_url: str = BOARD_URL) -> list[ListedArticle]:
     """Every article row on one list page, pinned posts first (as on the page).
+
+    `list_url` is the board's list page address; it only decides the `url` of each row. The
+    markup is the same on every board. A board without a category column (the global school's
+    majors) gives rows with `category_label=None`.
 
     An empty list is a valid result only for an offset past the last page; a page with no
     `ul.board-list-wrap` at all raises ParseError so a changed layout fails loudly.
@@ -96,7 +102,11 @@ def parse_list(html: str) -> list[ListedArticle]:
     wrap = soup.select_one("ul.board-list-wrap")
     if wrap is None:
         raise ParseError("ul.board-list-wrap not found")
-    return [_parse_row(li) for li in wrap.find_all("li", recursive=False) if li.select_one("dl")]
+    return [
+        _parse_row(li, list_url)
+        for li in wrap.find_all("li", recursive=False)
+        if li.select_one("dl")
+    ]
 
 
 _BLOCK_TAGS = ("p", "div", "li", "tr", "h1", "h2", "h3", "h4", "h5", "h6")

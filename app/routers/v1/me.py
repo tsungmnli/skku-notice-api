@@ -7,6 +7,7 @@ from fastapi import APIRouter, Body, Depends, Response
 from sqlalchemy import delete, update
 from sqlalchemy.orm import Session
 
+from app import reads
 from app.auth import limits
 from app.auth.deps import Auth, current_auth, get_app_settings, get_limiter
 from app.auth.errors import AuthError
@@ -23,6 +24,7 @@ from app.config import Settings
 from app.db import get_session
 from app.models import User
 from app.routers.v1.auth import clear_session_cookie, user_out
+from app.schemas import ReadOut, ReadsIn, ReadsOut, ReadsSaved
 from app.timeutil import get_now
 
 router = APIRouter(prefix="/me", tags=["me"])
@@ -50,6 +52,36 @@ def update_preferences(
     db.execute(update(User).where(User.id == auth.user.id).values(preferences=stored))
     db.commit()
     return load_preferences(stored)
+
+
+@router.get("/reads", response_model=ReadsOut)
+def list_my_reads(
+    auth: Annotated[Auth, Depends(current_auth)],
+    db: Annotated[Session, Depends(get_session)],
+    now: Annotated[datetime, Depends(get_now)],
+):
+    """The notices this account opened that are still inside the NEW/UPDATED window."""
+    rows = reads.list_reads(db, auth.user.id, now=now)
+    return ReadsOut(items=[ReadOut(article_id=i, read_at=at) for i, at in rows])
+
+
+# POST, not PUT: the web flushes pending marks with `navigator.sendBeacon` when the tab closes,
+# and a beacon can only POST. The call is still idempotent.
+@router.post("/reads", response_model=ReadsSaved)
+def mark_reads(
+    body: ReadsIn,
+    auth: Annotated[Auth, Depends(current_auth)],
+    db: Annotated[Session, Depends(get_session)],
+    limiter: Annotated[RateLimiter, Depends(get_limiter)],
+    now: Annotated[datetime, Depends(get_now)],
+):
+    """Mark notices as opened (up to 200 ids). Safe to repeat; see `reads.save_reads`."""
+    limits.enforce(limiter, f"reads:{auth.user.id}", limits.READS_PER_USER)
+    saved = reads.save_reads(
+        db, auth.user.id, [(m.article_id, m.read_at) for m in body.items], now=now
+    )
+    db.commit()
+    return ReadsSaved(saved=saved)
 
 
 @router.delete("", status_code=204)

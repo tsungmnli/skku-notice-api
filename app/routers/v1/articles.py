@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app import queries
+from app.cache import public_cache
 from app.db import get_session
 from app.queries import MAX_SIZE, ArticleFilters
 from app.schemas import (
@@ -22,13 +23,15 @@ router = APIRouter(tags=["articles"])
 MAX_PAGE = 100_000  # keeps OFFSET far from integer overflow
 
 
-@router.get("/articles", response_model=ArticleListResponse)
+@router.get("/articles", response_model=ArticleListResponse, dependencies=[Depends(public_cache)])
 def list_articles(
     session: Annotated[Session, Depends(get_session)],
     now: Annotated[datetime, Depends(get_now)],
     q: Annotated[str | None, Query(max_length=100)] = None,
     category: Annotated[list[str] | None, Query()] = None,
     writer: Annotated[list[str] | None, Query()] = None,
+    department: Annotated[list[str] | None, Query()] = None,
+    source: Annotated[list[str] | None, Query()] = None,
     date_from: date | None = None,
     date_to: date | None = None,
     pinned: PinnedFilter = "include",
@@ -49,6 +52,8 @@ def list_articles(
         q=q,
         categories=category or [],
         writers=writer or [],
+        departments=department or [],
+        sources=source or [],
         date_from=date_from,
         date_to=date_to,
         pinned=pinned,
@@ -84,7 +89,9 @@ def lookup_articles(
     )
 
 
-@router.get("/articles/{article_id}", response_model=ArticleOut)
+@router.get(
+    "/articles/{article_id}", response_model=ArticleOut, dependencies=[Depends(public_cache)]
+)
 def get_article(article_id: int, session: Annotated[Session, Depends(get_session)]) -> ArticleOut:
     article = queries.get_article(session, article_id)
     if article is None:

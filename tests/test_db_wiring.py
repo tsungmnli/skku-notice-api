@@ -1,11 +1,9 @@
 """DB wiring that must hold without a reachable database."""
 
-import pytest
 from fastapi import Depends
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.config import Settings
 from app.db import get_session
 from app.main import create_app
 from tests.conftest import make_settings
@@ -32,21 +30,3 @@ def test_no_database_url_means_no_engine_and_a_clear_503():
     res = TestClient(app).get("/probe")
     assert res.status_code == 503
     assert "데이터베이스" in res.json()["detail"]
-
-
-@pytest.mark.parametrize(
-    "given",
-    [
-        "postgres://u:p@h:5432/d",
-        "postgresql://u:p@h:5432/d",
-        "postgresql+psycopg://u:p@h:5432/d",
-    ],
-)
-def test_sqlalchemy_url_uses_the_psycopg_driver(given):
-    s = Settings(_env_file=None, database_url=given)  # type: ignore
-    assert s.sqlalchemy_url == "postgresql+psycopg://u:p@h:5432/d"
-
-
-def test_sqlalchemy_url_requires_database_url():
-    with pytest.raises(RuntimeError, match="DATABASE_URL"):
-        Settings(_env_file=None).sqlalchemy_url  # type: ignore  # noqa: B018

@@ -1,6 +1,7 @@
 """Read the view page of notices whose title gave no deadline, and keep what the body says.
 
-Runs after the list crawl, in the same process and with the same polite `Fetcher`. The body is
+Runs after the list crawl, in the same process and with the same polite `Fetcher`. Notices of
+every enabled board are read, newest first, each from its own board's address. The body is
 parsed and thrown away: only the deadline, the event date and the line they came from are stored.
 Each notice is read once (`detail_checked_at`); a page that cannot be fetched or parsed stays
 unchecked and is tried again on the next run. After the reading rules change, clearing
@@ -16,9 +17,9 @@ from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.crawler.deadline import event_for, extract_from_body
-from app.crawler.fetch import DetailSource, FetchError
+from app.crawler.fetch import DetailSource, FetchError, RequestBudgetExceeded
 from app.crawler.parser import ParseError, parse_detail
-from app.models import Article
+from app.models import Article, Source
 from app.timeutil import now_kst
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,7 @@ class DetailResult:
     events: int = 0  # of those, notices that got an event date
     failed: int = 0  # pages that could not be fetched or parsed (retried next run)
     gave_up: bool = False  # stopped early because of consecutive failures
+    budget_hit: bool = False  # stopped early because the run's request budget was used up
 
 
 def _body_may_decide():
@@ -48,32 +50,44 @@ def read_details(
     limit: int,
     max_age_days: int = 60,
     today: date | None = None,
+    source_id: int | None = None,
 ) -> DetailResult:
+    """`source_id` limits the reading to one board's notices (`--source`); None = every board."""
     if limit <= 0:
         return DetailResult()
     today = today or now_kst().date()
+    stmt = (
+        select(
+            Article.id,
+            Article.article_no,
+            Article.title,
+            Article.posted_on,
+            Article.deadline_at,
+            Source.list_url,
+        )
+        .join(Source, Source.id == Article.source_id)
+        .where(
+            Source.enabled.is_(True),
+            _body_may_decide(),
+            Article.detail_checked_at.is_(None),
+            Article.posted_on >= today - timedelta(days=max_age_days),
+        )
+        .order_by(Article.posted_on.desc(), Article.id.desc())
+        .limit(limit)
+    )
+    if source_id is not None:
+        stmt = stmt.where(Article.source_id == source_id)
     with factory() as session:
-        todo = session.execute(
-            select(
-                Article.id,
-                Article.article_no,
-                Article.title,
-                Article.posted_on,
-                Article.deadline_at,
-            )
-            .where(
-                _body_may_decide(),
-                Article.detail_checked_at.is_(None),
-                Article.posted_on >= today - timedelta(days=max_age_days),
-            )
-            .order_by(Article.posted_on.desc(), Article.id.desc())
-            .limit(limit)
-        ).all()
+        todo = session.execute(stmt).all()
 
     checked = deadlines = events = failed = streak = 0
     for art in todo:
         try:
-            body = parse_detail(source.detail_page(art.article_no))
+            body = parse_detail(source.detail_page(art.article_no, art.list_url))
+        except RequestBudgetExceeded:
+            # Not the page's fault and not a failure: the rest simply waits for the next run.
+            logger.warning("request budget used up; the remaining notices wait for the next run")
+            return DetailResult(checked, deadlines, events, failed, budget_hit=True)
         except (FetchError, ParseError) as exc:
             failed += 1
             streak += 1

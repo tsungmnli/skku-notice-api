@@ -10,6 +10,8 @@ def out(**dates) -> dict:
     values = {
         "id": 1,
         "article_no": 1,
+        "source": "skku",
+        "department": "skku",
         "title": "t",
         "writer": "w",
         "posted_on": date(2026, 11, 3),
@@ -21,6 +23,7 @@ def out(**dates) -> dict:
         "deadline_at": None,
         "event_at": None,
         "deadline_source": None,
+        "content_changed_at": None,
     }
     return ArticleOut(**{**values, **dates}).model_dump(mode="json")
 

@@ -38,9 +38,12 @@ def normalize_label(raw: str) -> str:
 def category_code(label: str | None) -> str:
     """Board label -> our category code. Unknown or missing labels fall back to `general`.
 
-    A new label on the school's side must not stop the crawl, so it only logs a warning.
+    A new label on the school's side must not stop the crawl, so it only logs a warning. No label
+    at all is normal on boards that have no category column, and is not worth a warning.
     """
-    name = normalize_label(label or "")
+    if label is None:
+        return FALLBACK_CODE
+    name = normalize_label(label)
     code = LABEL_TO_CODE.get(name)
     if code is None:
         logger.warning("unknown board category label %r; using %r", label, FALLBACK_CODE)

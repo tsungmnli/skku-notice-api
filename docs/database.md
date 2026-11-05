@@ -42,9 +42,14 @@ uv run alembic downgrade -1
 
 ```
 categories(code PK, name, sort_order)
-articles(id PK, article_no UNIQUE, title, writer, posted_on, display_no, is_pinned,
+departments(code PK, name, sort_order)
+sources(id PK, slug UNIQUE, department_code → departments ON DELETE RESTRICT, name, list_url,
+        level CHECK in ('all','undergrad','grad'), enabled, sort_order, created_at)
+articles(id PK, source_id → sources ON DELETE RESTRICT DEFAULT 1, article_no,
+         UNIQUE(source_id, article_no), title, writer, posted_on, display_no, is_pinned,
          view_count, url, deadline_at timestamptz, event_at timestamptz,
          deadline_source, deadline_evidence, detail_checked_at timestamptz,
+         content_changed_at timestamptz, view_count_synced_at timestamptz NOT NULL DEFAULT now(),
          created_at, updated_at)
 article_categories(article_id → articles ON DELETE CASCADE,
                    category_code → categories ON DELETE RESTRICT)   -- PK(article_id, category_code)
@@ -54,8 +59,18 @@ sessions(token_hash PK, user_id → users ON DELETE CASCADE, created_at, expires
          last_used_at, client, user_agent)
 email_tokens(token_hash PK, user_id → users ON DELETE CASCADE, purpose, created_at,
              expires_at, used_at)
+user_article_reads(user_id → users ON DELETE CASCADE, article_id → articles ON DELETE CASCADE,
+                   read_at timestamptz)   -- PK(user_id, article_id)
 ```
 
+- `sources` 는 크롤러가 읽는 게시판 하나입니다. 학생이 UI에서 고르는 단위는 `departments` 이고, 한 학과가 게시판을 여러 개 가질 수 있습니다
+  (글로벌융합학부는 공통 공지 + 전공별 4개). `sources.id = 1` 은 학교 전체 공지(`notice01.do`)이고 마이그레이션 0006이 직접 넣습니다.
+  다른 게시판은 크롤러의 소스 동기화가 채웁니다.
+- `articles.source_id` 의 기본값 1 은 일부러 둔 것입니다. 0006을 먼저 적용한 상태에서도 이전 릴리스(이 컬럼을 모르는)가 글을 계속 넣을 수 있고,
+  기존 글은 모두 학교 전체 공지 소속이 됩니다. 게시판마다 글 번호를 따로 매기므로 진짜 키는 `(source_id, article_no)` 입니다.
+  `article_no` 단독 UNIQUE 는 0007이 지웠습니다. 이전 릴리스의 `ON CONFLICT (article_no)` 가 그 제약을 필요로 했기 때문에 0006까지는
+  남겨 두었습니다. **0007은 `(source_id, article_no)` 로 upsert 하는 크롤러를 먼저 배포한 뒤에 적용하세요.** 옛 크롤러가 도는 중에 적용하면
+  그 upsert가 실패합니다. 0007을 되돌리면(`downgrade`) 두 게시판이 같은 번호를 가진 글이 있을 때 단독 UNIQUE를 다시 만들 수 없어 실패합니다.
 - 계정 테이블: `users.email` 은 항상 소문자(CHECK)라서 UNIQUE가 대소문자를 구분하지 않습니다.
   `password_hash` 가 NULL이면 Google로만 가입한 계정입니다. `email_verified_at` 이 NULL이면 로그인할 수 없습니다.
 - `users.preferences` 는 기기를 오가는 설정(캘린더 필터)을 담은 JSON 한 덩어리입니다. 스키마는 `app/auth/preferences.py` 가 정하고, 읽을 때는 못 읽는 섹션을 버리고 쓸 때는 엄격하게 검사합니다. 컬럼이 NOT NULL + 기본값이라 이전 버전 API 가 돌아가는 중에 마이그레이션해도 안전합니다.
@@ -69,6 +84,9 @@ email_tokens(token_hash PK, user_id → users ON DELETE CASCADE, purpose, create
 - `deadline_source` 는 마감을 어디서 읽었는지(`title` / `body`)이고, `deadline_evidence` 는 본문에서 읽은
   경우 그 줄(100자 이내)입니다. 본문 전체는 저장하지 않습니다.
 - `detail_checked_at` 이 채워진 글은 상세 페이지를 이미 읽은 것이라 다시 요청하지 않습니다.
+- `content_changed_at` 은 크롤러가 **글이 수정된 것을 본 시각**입니다(지금은 제목이 바뀐 경우만). NEW/UPDATED 표시의 근거라서 조회수, 고정 해제, 마감을 다시 읽은 결과로는 바뀌지 않습니다. `NULL` 은 "바뀐 적 없음"이고, 읽는 쪽은 `posted_on` 으로 대신합니다. 마이그레이션이 기존 글을 `NULL` 로 두는 것이 중요합니다 (`now()` 로 채우면 모든 글이 UPDATED가 됩니다).
+- `view_count_synced_at` 은 조회수를 마지막으로 쓴 시각입니다. 조회수만 달라진 글은 이 값이 하루보다 오래됐을 때만 다시 씁니다 (`app/crawler/store.py`의 `VIEW_REFRESH_AFTER`). 기본값 `now()` 덕분에 새 글은 하루 뒤부터 갱신됩니다.
+- `user_article_reads` 는 로그인한 사용자가 연 글입니다 (글 id와 시각만). 표시 기간(`app/freshness.py`, 서울 날짜 7일)이 끝난 글의 행은 크롤러 CronJob이 지우고, API도 기간 밖의 글은 저장을 거절합니다. 그래서 테이블 크기는 계정 수 × 최근 7일의 글 수를 넘지 않습니다. 계정이나 글이 지워지면 같이 지워집니다.
 - 제목 검색용 `pg_trgm` 인덱스는 아직 없습니다. 글이 수만 건이어도 순차 스캔으로 충분하며, 느려지면 3단계 이후에 추가합니다.
 
 ## 로컬 개발

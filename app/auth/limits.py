@@ -27,6 +27,9 @@ RESET_PER_IP = (30, HOUR)
 DELETE_FAIL_PER_USER = (5, 15 * MINUTE)
 # Saving settings. The web waits a moment after the last change, so this is far above real use.
 PREFERENCES_PER_USER = (120, HOUR)
+# Marking notices as read. The web collects clicks for a few seconds and sends them in one
+# request (up to 200 ids), so this is far above real use as well.
+READS_PER_USER = (60, MINUTE)
 
 
 def enforce(limiter: RateLimiter, key: str, policy: tuple[int, int]) -> None:

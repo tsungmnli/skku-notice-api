@@ -1,4 +1,5 @@
 from collections import Counter
+from contextlib import contextmanager
 from datetime import date, datetime
 from pathlib import Path
 
@@ -9,7 +10,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.crawl import main
 from app.crawler.config import get_crawler_settings
 from app.crawler.details import DetailResult, read_details
-from app.crawler.fetch import FetchError
+from app.crawler.fetch import FetchError, RequestBudgetExceeded
+from app.crawler.parser import BOARD_URL
 from app.crawler.run import crawl
 from app.models import Article
 from app.timeutil import KST
@@ -44,7 +46,7 @@ class Detail:
         self.fail = fail
         self.requested: list[int] = []
 
-    def detail_page(self, article_no: int) -> str:
+    def detail_page(self, article_no: int, list_url: str = BOARD_URL) -> str:
         self.requested.append(article_no)
         if article_no in self.fail:
             raise FetchError(f"{article_no}: server down")
@@ -280,8 +282,17 @@ def test_a_wrong_event_date_is_cleared_when_the_page_is_read_again(factory):
 class FakeFetcher(ListSource):
     """The school's site: the real list page, and the same notice body for every view."""
 
-    def detail_page(self, article_no: int) -> str:
+    def detail_page(self, article_no: int, list_url: str = BOARD_URL) -> str:
         return page(QUANTUM[0])
+
+    # The CLI takes three things from `Fetcher`: `board(url)` (one board's pages), `budget(n)`
+    # (a request cap around each phase) and `detail_page` (read straight from the fetcher).
+    def board(self, list_url: str) -> "FakeFetcher":
+        return self  # every board serves the same list page
+
+    @contextmanager
+    def budget(self, requests):
+        yield  # this fake has no request cap
 
 
 class _Ctx:
@@ -308,3 +319,29 @@ def test_cli_reads_details_after_the_list(monkeypatch, migrated_db_url, factory)
         sources = Counter(s.scalars(select(Article.deadline_source)))
     # 4 of the 15 titles carry a deadline; the other 11 got one from the body.
     assert sources == {"title": 4, "body": 11}
+
+
+class RunsOut(Detail):
+    """Serves `allowed` pages, then the request budget is gone."""
+
+    def __init__(self, pages: dict[int, str], allowed: int):
+        super().__init__(pages)
+        self.allowed = allowed
+
+    def detail_page(self, article_no: int, list_url: str = BOARD_URL) -> str:
+        if len(self.requested) >= self.allowed:
+            raise RequestBudgetExceeded("request budget used up")
+        return super().detail_page(article_no, list_url)
+
+
+def test_an_used_up_request_budget_stops_the_run_without_counting_failures(factory):
+    ok = '<dl class="board-write-box"><dd><pre>x</pre></dd></dl>'
+    for n in range(1, 5):  # newest first: 4, 3, 2, 1
+        add(factory, n, posted_on=date(2026, 10, 20 + n))
+    source = RunsOut({n: ok for n in range(1, 5)}, allowed=2)
+    result = read(factory, source)
+    assert (result.checked, result.failed, result.gave_up, result.budget_hit) == (2, 0, False, True)
+    assert row(factory, 4).detail_checked_at is not None
+    assert row(factory, 3).detail_checked_at is not None
+    assert row(factory, 2).detail_checked_at is None  # waits for the next run
+    assert row(factory, 1).detail_checked_at is None

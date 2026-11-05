@@ -2,21 +2,9 @@ import threading
 import time
 from types import SimpleNamespace
 
-import pytest
 from argon2 import PasswordHasher
 
 from app.auth import passwords
-
-
-@pytest.fixture(autouse=True)
-def fast_hasher(monkeypatch):
-    # Cheap parameters keep the suite fast; the production defaults are checked separately.
-    monkeypatch.setattr(
-        passwords, "_hasher", PasswordHasher(time_cost=1, memory_cost=8, parallelism=1)
-    )
-    passwords._dummy_hash.cache_clear()
-    yield
-    passwords._dummy_hash.cache_clear()
 
 
 def test_hash_and_verify():

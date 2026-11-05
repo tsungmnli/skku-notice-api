@@ -8,3 +8,4 @@ __pycache__/
 !.env.example
 
 /tests/crawler/fixtures/
+/body.json

@@ -1,8 +1,10 @@
 from pathlib import Path
 
 import pytest
+from argon2 import PasswordHasher
 from fastapi.testclient import TestClient
 
+from app.auth import passwords
 from app.config import Settings
 from app.main import create_app
 
@@ -36,3 +38,16 @@ def app():
 @pytest.fixture
 def client(app):
     return TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def fast_hasher(monkeypatch):
+    """Cheap Argon2 parameters for every test: signing up or logging in with the production ones
+    (64 MiB, t=3) costs ~0.1 s a time, and the account tests do it hundreds of times. The
+    production parameters themselves are checked in tests/auth/test_passwords.py."""
+    monkeypatch.setattr(
+        passwords, "_hasher", PasswordHasher(time_cost=1, memory_cost=8, parallelism=1)
+    )
+    passwords._dummy_hash.cache_clear()
+    yield
+    passwords._dummy_hash.cache_clear()

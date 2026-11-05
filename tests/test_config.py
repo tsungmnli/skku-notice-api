@@ -110,3 +110,21 @@ def test_google_credentials_pair_is_accepted():
 def test_google_needs_a_session_secret_to_sign_its_state_cookie():
     with pytest.raises(ValidationError, match="SESSION_SECRET"):
         settings(google_client_id="id", google_client_secret="secret")
+
+
+@pytest.mark.parametrize(
+    "given",
+    [
+        "postgres://u:p@h:5432/d",
+        "postgresql://u:p@h:5432/d",
+        "postgresql+psycopg://u:p@h:5432/d",
+    ],
+)
+def test_sqlalchemy_url_uses_the_psycopg_driver(given):
+    s = Settings(_env_file=None, database_url=given)  # type: ignore
+    assert s.sqlalchemy_url == "postgresql+psycopg://u:p@h:5432/d"
+
+
+def test_sqlalchemy_url_requires_database_url():
+    with pytest.raises(RuntimeError, match="DATABASE_URL"):
+        Settings(_env_file=None).sqlalchemy_url  # type: ignore  # noqa: B018
